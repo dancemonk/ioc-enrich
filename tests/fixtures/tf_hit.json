@@ -1,0 +1,1 @@
+{"query_status":"ok","data":[{"ioc":"www.x.com","malware_printable":"XLoader","threat_type":"botnet_cc"},{"ioc":"www.x.com","malware_printable":"Formbook","threat_type":"botnet_cc"},{"ioc":"www.x.com","malware_printable":"XLoader","threat_type":"payload_delivery"}]}

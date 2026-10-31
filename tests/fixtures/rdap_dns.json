@@ -1,0 +1,3 @@
+{"version": "1.0", "publication": "2026-10-28T00:00:00Z",
+ "services": [[["info"], ["https://rdap.identitydigital.services/rdap/"]],
+              [["cc", "tv"], ["https://tld-rdap.verisign.com/cc/v1/"]]]}

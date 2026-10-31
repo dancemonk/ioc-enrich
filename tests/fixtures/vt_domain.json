@@ -1,0 +1,32 @@
+{
+ "data": {
+  "id": "www.grinswakebthu.info",
+  "type": "domain",
+  "attributes": {
+   "last_analysis_stats": {
+    "malicious": 2,
+    "suspicious": 0,
+    "harmless": 60,
+    "undetected": 30,
+    "timeout": 0
+   },
+   "last_analysis_results": {
+    "EngineA": {
+     "category": "malicious",
+     "result": "malware"
+    },
+    "EngineB": {
+     "category": "malicious",
+     "result": "malicious"
+    },
+    "EngineC": {
+     "category": "harmless",
+     "result": "clean"
+    }
+   },
+   "creation_date": 1778803200,
+   "registrar": "NameSilo, LLC",
+   "reputation": -5
+  }
+ }
+}

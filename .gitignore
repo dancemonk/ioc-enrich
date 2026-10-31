@@ -1,0 +1,16 @@
+# Secrets: API keys must never be committed
+.env
+*.env
+# Local environment and caches
+.venv/
+__pycache__/
+*.egg-info/
+*.sqlite
+# Tool output
+ioc-enrich-*.csv
+out/
+# Plan-execution scratch
+.superpowers/
+.DS_Store
+# Design-tool output (critique snapshots)
+.impeccable/

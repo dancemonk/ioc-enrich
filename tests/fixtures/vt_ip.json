@@ -1,0 +1,21 @@
+{
+ "data": {
+  "id": "146.59.71.167",
+  "type": "ip_address",
+  "attributes": {
+   "last_analysis_stats": {
+    "malicious": 1,
+    "suspicious": 0,
+    "harmless": 60,
+    "undetected": 31,
+    "timeout": 0
+   },
+   "last_analysis_results": {
+    "EngineA": {
+     "category": "malicious",
+     "result": "malware"
+    }
+   }
+  }
+ }
+}

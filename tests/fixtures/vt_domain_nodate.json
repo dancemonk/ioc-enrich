@@ -1,0 +1,16 @@
+{
+ "data": {
+  "id": "www.independent.ie",
+  "type": "domain",
+  "attributes": {
+   "last_analysis_stats": {
+    "malicious": 0,
+    "suspicious": 0,
+    "harmless": 60,
+    "undetected": 32,
+    "timeout": 0
+   },
+   "last_analysis_results": {}
+  }
+ }
+}

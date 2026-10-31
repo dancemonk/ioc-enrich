@@ -1,0 +1,21 @@
+{
+ "data": {
+  "id": "x",
+  "type": "url",
+  "attributes": {
+   "last_analysis_stats": {
+    "malicious": 0,
+    "suspicious": 1,
+    "harmless": 60,
+    "undetected": 31,
+    "timeout": 0
+   },
+   "last_analysis_results": {
+    "EngineA": {
+     "category": "suspicious",
+     "result": "suspicious"
+    }
+   }
+  }
+ }
+}

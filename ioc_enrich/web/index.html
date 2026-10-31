@@ -1,0 +1,771 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ioc-enrich</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2228; --muted: #5d6773;
+    --line: #d9dee4; --control-border: #7a848f; --accent: #1f5fbf; --on-accent: #ffffff; --on-warn: #ffffff; --hit: #b42318; --ok: #1a7f37; --warn: #9a6700; --weak: #6941c6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161b; --panel: #1a2027; --text: #e3e8ee; --muted: #9aa5b1;
+      --line: #2c353f; --control-border: #66727f; --accent: #6ea8fe; --on-accent: #0b1220; --on-warn: #1d1300; --hit: #ff8a80; --ok: #7ee2a8; --warn: #f2cc60; --weak: #b9a3f0;
+    }
+  }
+  :root { color-scheme: light dark; }   /* native controls (date picker icon) follow the theme */
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* the hidden attribute wins over any display rule below */
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .field-label { display: block; font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+  .field-hint { color: var(--muted); font-weight: 400; }
+  textarea { width: 100%; min-height: 140px; resize: vertical; padding: 10px; border-radius: 6px;
+             border: 1px solid var(--control-border); background: var(--bg); color: var(--text);
+             caret-color: var(--accent); font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  textarea:focus { border-color: var(--accent); }
+  /* When a run finishes the paste box steps back once; clicking into it gives the full size again,
+     and it stays big until the next run finishes (it never shrinks on blur, so nothing below jumps). */
+  textarea.compact { min-height: 64px; height: 64px; }
+  textarea::placeholder { color: var(--muted); opacity: 1; }   /* browser default gray was 3.9:1 in dark */
+  textarea:focus-visible { outline-offset: 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 12px; }
+  .controls label { display: flex; gap: 8px; align-items: center; min-height: 32px; color: var(--muted);
+                    font-size: 14px; cursor: pointer; }
+  input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+  input[type=date] { min-height: 32px; padding: 4px 6px; border: 1px solid var(--control-border); border-radius: 6px;
+                     background: var(--bg); color: var(--text); caret-color: var(--accent); }
+  button { min-height: 32px; padding: 7px 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent);
+           color: var(--on-accent); font-weight: 600; cursor: pointer; }
+  /* Run row: the VirusTotal choice sits right next to the action it changes. */
+  .run-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+             margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .switch { display: flex; align-items: center; gap: 10px; border: 0; margin: 0; padding: 0; }
+  .switch legend { float: left; padding: 0; font-size: 14px; font-weight: 600; }
+  .segments { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--control-border); border-radius: 8px; }
+  .segments label { position: relative; display: flex; align-items: center; min-height: 28px; padding: 4px 12px;
+                    border-radius: 6px; font-size: 14px; color: var(--muted); cursor: pointer; }
+  .segments input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+  .segments label:has(input:checked) { background: var(--text); color: var(--bg); font-weight: 600; }
+  .segments label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .segments label:has(input:disabled) { cursor: default; opacity: .6; }
+  button.sends-vt { background: var(--warn); border-color: var(--warn); color: var(--on-warn); }
+  button.in-progress:disabled { opacity: 1; cursor: progress; }   /* progress label stays readable */
+  .send-icon { width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; flex: none; }
+  #run .send-icon { display: none; }
+  #run.sends-vt .send-icon { display: inline-block; }   /* the icon appears only when IOCs go to VirusTotal */
+  .vt-note { margin: 8px 0 0; font-size: 13px; color: var(--warn); }
+  @media (pointer: coarse) {   /* touch screens: 44px targets, no keyboard hint */
+    button, .controls label, input[type=date] { min-height: 44px; }
+    .segments label { min-height: 40px; }   /* + 2px track inset each side = 44px */
+    .hint { display: none; }
+  }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                     clip: rect(0 0 0 0); white-space: nowrap; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #cost { margin: 14px 0 0; font-size: 14px; color: var(--muted); min-height: 1.4em; font-variant-numeric: tabular-nums; }
+  #message { color: var(--muted); font-size: 14px; min-height: 1.4em; margin: 8px 0; }
+  #message.tone-success { color: var(--ok); }
+  #message.tone-warn { color: var(--text); }   /* amber is reserved for VirusTotal; warnings get an icon instead */
+  .msg-icon { width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; }
+  #message.tone-error { color: var(--hit); }
+  .hint { font-size: 12px; color: var(--muted); }
+  .hint kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5px;
+              border: 1px solid var(--control-border); border-radius: 4px; }
+  table.plan-view th:nth-child(4), table.plan-view td.enrich { display: none; }
+  .table-wrap { overflow-x: auto; margin-top: 16px; }
+  /* Fixed columns: opening "links" or a long URL never reflows the table or scrolls sideways. */
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th:nth-child(1) { width: 72px; }
+  th:nth-child(2) { width: 30%; }
+  th:nth-child(3) { width: 36%; }
+  table.plan-view th:nth-child(3) { width: auto; }   /* Enrichment hidden: Status absorbs the spare width */
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  td.enrich { overflow-wrap: anywhere; }
+  .flag { color: var(--hit); font-weight: 600; }
+  .clean { color: var(--ok); }
+  .skip, .plan, .checking { color: var(--muted); }
+  .weak { color: var(--text); }                 /* weak signal: quieter than a strong (red) flag */
+  .weak .status svg { color: var(--weak); }    /* violet: amber is reserved for "goes to VirusTotal" */
+  /* One chip per source: who said what, readable at a glance. */
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--control-border);
+          border-radius: 999px; font-size: 12px; line-height: 18px; color: var(--muted); font-weight: 500; }
+  .chip svg { width: 12px; height: 12px; flex: none; }
+  .chip-flagged { color: var(--hit); border-color: var(--hit); font-weight: 700; }
+  .chip-clean { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+  .chip-not_checked, .chip-skipped { border-style: dashed; }
+  .chip-flagged.chip-weak { color: var(--weak); border-color: var(--weak); font-weight: 600; }
+  .legend { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+  .cdn-note { margin-top: 4px; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .next-run { margin: 16px 0 0; padding: 8px 12px; border: 1px dashed var(--control-border); border-radius: 6px;
+              font-size: 13px; }
+  .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 16px; }
+  .table-tools .count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  td.empty { color: var(--muted); padding: 16px 8px; }
+  @media (max-width: 640px) {   /* phones: each row becomes a small card, nothing scrolls sideways */
+    thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .table-wrap { overflow-x: visible; }
+    table, tbody, tr, td { display: block; }
+    tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 10px 0;
+         border-bottom: 1px solid var(--line); }
+    td { border: 0; padding: 2px 0; }
+    td.type { flex: none; color: var(--muted); }
+    td.value { flex: 1 1 0; min-width: 0; }
+    td.status-cell, td.enrich, td.empty { flex: 1 1 100%; }
+    td.enrich:empty { display: none; }
+    td.mono { white-space: normal; overflow-wrap: anywhere; }
+  }
+  .status { display: flex; gap: 6px; align-items: flex-start; }
+  .status svg { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+  .links { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow-wrap: normal; margin-top: 6px; display: none; }
+  .links.open { display: block; }
+  .links a { display: inline-flex; align-items: center; min-height: 24px; padding: 0 2px; margin: 2px 8px 2px 0;
+             color: var(--accent); text-underline-offset: 2px; }
+  .links .risk-note { display: block; margin-top: 2px; font-size: 12px; color: var(--warn); }
+  .toggle { min-height: 24px; background: none; border: none; color: var(--accent); padding: 2px 0; font-weight: 400;
+            font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  @media (pointer: coarse) { .toggle, .links a { min-height: 44px; } }   /* after the base rules, so it wins */
+  .bottom { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+  .note { color: var(--muted); font-size: 12px; }
+  .banner { border: 1px solid var(--control-border); background: var(--panel);
+            border-radius: 6px; padding: 10px 14px; margin: 0 0 16px; font-size: 14px; }
+  .banner strong { color: var(--text); }
+  .banner code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>ioc-enrich</h1>
+  <p class="sub">Paste IOCs from anywhere (defanged is fine). Lookup only: nothing is ever sent to an IOC.</p>
+
+  <div id="keys-banner" class="banner" role="status" hidden></div>
+
+  <section class="panel">
+    <label for="text" class="field-label">IOCs to check <span class="field-hint">· domains, IPs, URLs or hashes, defanged is fine</span></label>
+    <textarea id="text" placeholder="www.taibeinan[.]cc, 146.59.71[.]167, hxxp://..." spellcheck="false"></textarea>
+    <div class="controls">
+      <label><span>Incident date <span class="field-hint">(for domain age)</span></span> <input type="date" id="incident"></label>
+      <label><input type="checkbox" id="nocache"> Ignore cache</label>
+    </div>
+    <div class="run-row">
+      <fieldset class="switch">
+        <legend>VirusTotal</legend>
+        <div class="segments">
+          <label><input type="radio" name="vt" value="on" checked> On</label>
+          <label><input type="radio" name="vt" value="off"> Off</label>
+        </div>
+      </fieldset>
+      <button id="run" disabled><svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg><span id="run-label">Check IOCs</span></button>
+      <button id="stop" type="button" class="secondary" hidden>Stop</button>
+      <span class="hint"><kbd>⌘</kbd> / <kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+    </div>
+    <p id="vt-note" class="vt-note" hidden><svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>VirusTotal adds every IOC it is asked about to its public dataset. Switch it off if that could tip off an attacker.</p>
+    <p id="cost" aria-live="polite"></p>
+  </section>
+
+  <p id="message" aria-live="polite" tabindex="-1"></p>
+
+  <p id="next-run" class="next-run" role="status" hidden></p>
+
+  <div class="table-tools" id="table-tools" hidden>
+    <fieldset class="switch">
+      <legend>Show</legend>
+      <div class="segments">
+        <label><input type="radio" name="show" value="all" checked> All</label>
+        <label><input type="radio" name="show" value="flagged"> Flagged only</label>
+      </div>
+    </fieldset>
+    <span class="count" id="flag-count" aria-live="polite"></span>
+    <span class="legend">Strong: VirusTotal (VT), ThreatFox (TF), URLhaus (UH), MalwareBazaar (MB) · Weak signal: only AlienVault OTX (OTX) pulses or AbuseIPDB (AIPDB) reports · "so far": a strong source was not asked (VirusTotal off, no key, stopped, shared CDN), so a stronger hit is still possible.</span>
+  </div>
+
+  <div class="table-wrap" id="table-wrap" hidden>
+    <table id="results" class="plan-view">
+      <caption class="visually-hidden">Planned lookups and results, one row per IOC</caption>
+      <thead><tr><th scope="col">Type</th><th scope="col">Value</th><th scope="col">Status</th><th scope="col">Details</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="bottom" id="bottom" hidden>
+    <button id="download" class="secondary" disabled>Download CSV</button>
+    <span class="note">The tool reports who flagged an IOC; the verdict is yours.</span>
+  </div>
+</main>
+
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+
+const $ = (id) => document.getElementById(id);
+let currentJob = null;
+let pollTimer = null;
+let planTimer = null;
+let running = false;   // true while a run is in progress
+let lastPlan = null;   // the server's latest plan for the text in the box (null while typing)
+let runInput = "";     // form contents when the shown results were started
+const openLinks = new Set();   // rows whose "links" panel is open, kept across redraws
+let runProgress = null;        // latest progress of the running job: {done, total, vt_done, vt_total, reused}
+let runSendsVt = false;        // whether the running job was started with VirusTotal on
+
+function vtOff() {
+  return document.querySelector('input[name="vt"][value="off"]').checked;
+}
+
+function plural(n, word) {
+  return n + " " + word + (n === 1 ? "" : "s");
+}
+
+// The plan's numbers for the CURRENT VirusTotal switch position. The server sends both,
+// so flipping the switch relabels Run at once instead of showing the old OPSEC label.
+function planCounts(plan) {
+  return plan.counts ? plan.counts[vtOff() ? "off" : "on"] : plan;
+}
+
+// "5 IOCs · up to 3 VirusTotal lookups": what a plan will do, in the analyst's words.
+function planSummary(plan) {
+  const c = planCounts(plan);
+  let text = plural(c.iocs, "IOC");
+  if (vtOff()) {
+    text += " · VirusTotal off";
+  } else if (c.vt_calls_max > 0) {
+    const vt = c.vt_calls === c.vt_calls_max ? plural(c.vt_calls, "VirusTotal lookup") : "up to " + plural(c.vt_calls_max, "VirusTotal lookup");
+    text += " · " + vt;
+  }
+  return text;
+}
+
+// Run says exactly what it will do before anything is sent (OPSEC gate).
+function updateRunButton() {
+  const run = $("run");
+  const plan = lastPlan;
+  const c = plan ? planCounts(plan) : null;
+  const canRun = !running && c !== null && c.lookups > 0;
+  const sendsVt = canRun && !vtOff() && c.vt_calls_max > 0;
+  let label = "Check IOCs";
+  let vtPending = sendsVt;
+  if (running) {
+    // During the run the button reports progress, so the OPSEC moment never goes quiet.
+    const p = runProgress;
+    vtPending = Boolean(p && p.vt_done < p.vt_total);
+    if (!p) label = "Starting…";
+    else if (vtPending) label = "VirusTotal lookup " + (p.vt_done + 1) + " of " + p.vt_total;
+    else {
+      // other sources: count IOCs, not individual lookups
+      const checkable = lastRows.filter((row) => !row.skip);
+      const done = checkable.filter((row) => row.kind !== "checking").length;
+      label = "Checking other sources · " + done + " of " + checkable.length + " IOCs done";
+    }
+  } else if (c && c.lookups === 0) {
+    label = "Nothing to check";
+  } else if (plan) {
+    label = "Check " + planSummary(plan);
+  } else if ($("text").value.trim() && $("run-label").textContent.startsWith("Check ")) {
+    label = $("run-label").textContent;   // plan refreshing: keep the last label (button stays disabled) instead of flashing
+  }
+  $("run-label").textContent = label;      // keeps the "sends out" icon next to it
+  run.disabled = !canRun;
+  run.classList.toggle("in-progress", running);
+  run.classList.toggle("sends-vt", vtPending);
+  $("vt-note").hidden = !sendsVt;
+  updateNextRun();
+}
+
+// After an edit, the last results stay on screen; this line says they are from the last run
+// and previews what the next run would do.
+function updateNextRun() {
+  const next = $("next-run");
+  const edited = Boolean(currentJob) && !running && inputKey() !== runInput;
+  next.hidden = !edited;
+  if (!edited) return;
+  const intro = "The results below are from your last run.";
+  if (!lastPlan) {                          // plan refreshing: keep the last sentence, no flicker
+    if (!next.textContent) next.textContent = intro;
+    return;
+  }
+  const preview = planCounts(lastPlan).lookups === 0 ? "Next run: nothing to check." : "Next run: " + planSummary(lastPlan) + ".";
+  setIfChanged(next, intro + " " + preview);
+}
+
+// What the shown results are about: the IOCs, the incident date and the VirusTotal choice.
+// ("Ignore cache" only changes where answers come from, so it is left out.)
+function inputKey() {
+  const body = formBody();
+  return JSON.stringify([body.text, body.incident_date, body.no_vt]);
+}
+
+function doneMessage() {
+  return showFlaggedOnly()
+    ? "Done. Showing flagged IOCs only; the CSV has all of them."
+    : "Done. Download the CSV or switch to Flagged only.";
+}
+
+// Returns the reply, or null when the server cannot be reached at all (it was stopped,
+// the laptop slept...). Callers then show a message instead of leaving the page locked.
+async function api(path, body) {
+  const options = { headers: { "X-Token": TOKEN } };
+  if (body !== undefined) {
+    options.method = "POST";
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  try {
+    return await fetch(path, options);
+  } catch (error) {
+    return null;
+  }
+}
+
+const UNREACHABLE = "Cannot reach ioc-enrich (is `ioc-enrich serve` still running?). "
+  + "Answers so far are cached; start it again and press the button to continue.";
+
+function formBody() {
+  return {
+    text: $("text").value,
+    incident_date: $("incident").value,
+    no_vt: vtOff(),
+    no_cache: $("nocache").checked,
+  };
+}
+
+let lastRows = [];     // rows currently shown, kept so the filter can re-draw them
+let rowsFinal = false; // true once the run has finished: then rows sort strongest evidence first
+let lastRunStopped = false;   // the shown results come from a stopped run
+// Strong first; a weak hit with strong sources still unasked ranks above a fully checked weak one.
+function tierRank(row) {
+  const order = { flag: 0, weak: 2, clean: 3, checking: 4, plan: 4, skip: 5 };
+  return row.kind === "weak" && (row.gaps || []).length ? 1 : order[row.kind];
+}
+
+// Live regions announce every text change, so only touch them when the words really differ.
+function setIfChanged(element, text) {
+  if (element.textContent !== text) element.textContent = text;
+}
+
+// tone: "info" (default), "success", "warn" or "error"; color is backed by the words themselves.
+function setMessage(text, tone = "info") {
+  const message = $("message");
+  message.replaceChildren();
+  if (text && (tone === "warn" || tone === "error")) {
+    const icon = statusIcon("alert");
+    icon.setAttribute("class", "msg-icon");
+    message.appendChild(icon);
+  }
+  message.append(text);
+  message.className = "tone-" + tone;
+}
+
+// Small drawn icons (one stroke style) so status is not carried by color alone.
+const ICON_PATHS = {
+  flag: ["M12 3 2 20h20L12 3z", "M12 10v4", "M12 17h.01"],   // warning triangle
+  clean: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "m8 12 3 3 5-6"],   // check in circle
+  plan: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "m10 8 4 4-4 4"],    // arrow in circle
+  skip: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M8 12h8"],          // dash in circle
+  info: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M12 11v5", "M12 8h.01"],   // i in circle
+  cached: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M12 7v5l3 2"],          // clock
+  alert: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M12 8v5", "M12 16h.01"],  // ! in circle
+};
+ICON_PATHS.checking = ICON_PATHS.plan;
+ICON_PATHS.weak = ICON_PATHS.flag;
+
+// Source chip: state -> icon and the words a screen reader hears.
+const CHIP = {
+  flagged: { icon: "flag", words: "flagged" },
+  clean: { icon: "clean", words: "not flagged" },
+  info: { icon: "info", words: "registration data" },
+  planned: { icon: "plan", words: "will be checked" },
+  cached: { icon: "cached", words: "cached answer" },
+  skipped: { icon: "skip", words: "skipped" },
+  not_checked: { icon: "skip", words: "not checked" },
+};
+
+function sourceChip(source) {
+  const chip = document.createElement("span");
+  const weak = source.strength === "weak";
+  const look = weak ? { icon: "flag", words: "flagged (weak signal)" } : CHIP[source.state];
+  chip.className = "chip chip-" + source.state + (weak ? " chip-weak" : "");
+  chip.title = source.name + ": " + (source.detail || look.words);
+  const label = document.createElement("span");
+  label.textContent = source.short + (source.metric ? " " + source.metric : "");   // e.g. "VT 2/92"
+  const spoken = document.createElement("span");
+  spoken.className = "visually-hidden";
+  const said = source.detail && !source.detail.startsWith(look.words) ? look.words + ", " + source.detail : (source.detail || look.words);
+  spoken.textContent = " (" + source.name + ": " + said + ")";
+  chip.append(statusIcon(look.icon), label, spoken);
+  return chip;
+}
+
+// Each fact once: the headline says how strong the evidence is, the chips say who flagged
+// (with their numbers), and Details holds only what the chips cannot show.
+function headline(row) {
+  const notAsked = (row.gaps || []).join(", ");   // e.g. "VT not asked (shared CDN)"
+  if (row.kind === "flag") return "Flagged · strong";
+  if (row.kind === "weak") return notAsked ? "Flagged · weak so far, " + notAsked : "Flagged · weak signal";
+  if (row.kind === "clean") return notAsked ? "Not flagged so far · " + notAsked : "Not flagged";
+  if (row.kind === "plan") return "Will check";
+  if (row.kind === "checking") return "Checking…";
+  if (row.kind === "skip" && !row.skip && row.sources.every((s) => !["planned", "cached"].includes(s.state)) && !currentJob) {
+    return "Nothing to check";
+  }
+  return row.status;
+}
+
+// "Flagged only" with nothing to show must never read as an all-clear before the run is over.
+function emptyFilterText(rows) {
+  const checkable = rows.filter((row) => !row.skip);
+  if (!rowsFinal) {
+    const answered = checkable.filter((row) => row.kind !== "checking").length;
+    return "Nothing flagged yet · " + answered + " of " + plural(checkable.length, "IOC") + " checked so far.";
+  }
+  if (lastRunStopped) return "No source flagged any of these IOCs (run stopped; some sources were not checked).";
+  if (rows.some((row) => (row.gaps || []).length)) {
+    return "No source flagged any of these IOCs so far; some strong sources were not asked.";
+  }
+  return "No source flagged any of these IOCs.";
+}
+
+function showFlaggedOnly() {
+  return document.querySelector('input[name="show"][value="flagged"]').checked;
+}
+
+function statusIcon(kind) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of ICON_PATHS[kind]) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+// Build the table with textContent only: values never become HTML.
+function renderRows(rows) {
+  lastRows = rows;
+  const body = $("rows");
+  body.replaceChildren();
+  $("table-wrap").hidden = rows.length === 0;     // no bare table headers on an empty page
+  $("bottom").hidden = !currentJob;               // Download only once there is something to download
+  $("results").classList.toggle("plan-view", !currentJob);   // Enrichment column only has content after a run
+  const strong = rows.filter((row) => row.kind === "flag").length;
+  const weakSoFar = rows.filter((row) => row.kind === "weak" && (row.gaps || []).length).length;
+  const weak = rows.filter((row) => row.kind === "weak").length - weakSoFar;
+  const checked = rows.filter((row) => !row.skip).length;
+  $("table-tools").hidden = !currentJob;
+  setIfChanged($("flag-count"), currentJob && (rowsFinal || !running)   // no running tally chatter
+    ? (strong + weak + weakSoFar) + " of " + plural(checked, "checked IOC") + " flagged (" + strong + " strong, " + weak + " weak"
+      + (weakSoFar ? ", " + weakSoFar + " weak so far" : "") + ")"
+    : "");
+  let shown = currentJob && showFlaggedOnly() ? rows.filter((row) => row.kind === "flag" || row.kind === "weak") : rows;
+  if (currentJob && rowsFinal) {
+    // Finished results: strongest evidence first (stable: equal tiers keep their input order).
+    shown = shown.map((row, i) => [row, i])
+      .sort((a, b) => (tierRank(a[0]) - tierRank(b[0])) || (a[1] - b[1]))
+      .map(([row]) => row);
+  }
+  if (rows.length && !shown.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "empty";
+    td.textContent = emptyFilterText(rows);
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+  shown.forEach((row, index) => {
+    const tr = document.createElement("tr");
+    const type = document.createElement("td");
+    type.className = "type";
+    type.textContent = row.type;
+    const value = document.createElement("td");
+    value.className = "mono value";
+    value.textContent = row.value;
+    const status = document.createElement("td");
+    const statusText = document.createElement("span");
+    statusText.textContent = headline(row);
+    const statusLine = document.createElement("div");
+    statusLine.className = "status";
+    statusLine.append(statusIcon(row.kind), statusText);
+    status.className = "status-cell " + row.kind;
+    status.appendChild(statusLine);
+    if (row.sources && row.sources.length) {
+      const chips = document.createElement("div");
+      chips.className = "chips";
+      for (const source of row.sources) chips.appendChild(sourceChip(source));
+      status.appendChild(chips);
+    }
+    if (row.cdn) {
+      const note = document.createElement("div");
+      note.className = "cdn-note";
+      note.textContent = "Shared CDN (" + row.cdn + ") · do not block";
+      status.appendChild(note);
+    }
+    const enrich = document.createElement("td");
+    enrich.className = "enrich";
+    enrich.textContent = (row.details || []).join(" · ");   // the CSV keeps the full enrichment text
+
+    if (row.links && row.links.length) {
+      const boxId = "links-" + index;
+      const toggle = document.createElement("button");
+      toggle.className = "toggle";
+      toggle.type = "button";
+      toggle.textContent = "links";
+      toggle.setAttribute("aria-label", "Manual-check links for " + row.value);
+      toggle.setAttribute("aria-controls", boxId);
+      const box = document.createElement("div");
+      box.className = openLinks.has(row.value) ? "links open" : "links";
+      box.id = boxId;
+      toggle.setAttribute("aria-expanded", String(openLinks.has(row.value)));
+      // With VirusTotal Off, its manual link goes last and says what a click does:
+      // searching on VirusTotal's website also puts the IOC into its public data.
+      const links = vtOff() ? [...row.links].sort((x, y) => (x[0] === "VirusTotal") - (y[0] === "VirusTotal")) : row.links;
+      for (const [label, url] of links) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.textContent = label;
+
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        const note = document.createElement("span");
+        note.className = "visually-hidden";
+        note.textContent = " (opens in a new tab)";
+        a.appendChild(note);
+        box.appendChild(a);
+      }
+      if (vtOff() && links.some(([label]) => label === "VirusTotal")) {
+        const risk = document.createElement("span");
+        risk.className = "risk-note";
+        risk.textContent = "Searching on VirusTotal also adds the IOC to its public data.";
+        box.appendChild(risk);
+      }
+      toggle.addEventListener("click", () => {
+        const open = box.classList.toggle("open");
+        toggle.setAttribute("aria-expanded", String(open));
+        if (open) openLinks.add(row.value); else openLinks.delete(row.value);
+      });
+      value.appendChild(document.createElement("br"));
+      value.appendChild(toggle);
+      value.appendChild(box);
+    }
+    tr.append(type, value, status, enrich);
+    body.appendChild(tr);
+  });
+}
+
+// One banner for missing API keys instead of "no key" on every row.
+function renderKeysBanner(missing) {
+  const banner = $("keys-banner");
+  banner.replaceChildren();
+  if (!missing || !missing.length) { banner.hidden = true; return; }
+  const title = document.createElement("strong");
+  title.textContent = "No API key for: " + missing.map((k) => k.name).join(", ") + ".";
+  const text = document.createElement("div");
+  text.textContent = "These sources are not checked. Add the keys to ~/.config/ioc-enrich/keys.env, "
+    + "then restart ioc-enrich serve (see README, \"Free API keys\").";
+  const vars = document.createElement("code");
+  vars.textContent = missing.map((k) => k.env).join("  ");
+  banner.append(title, text, vars);
+  banner.hidden = false;
+}
+
+async function loadKeysBanner() {
+  const reply = await api("/api/plan", { text: "" });
+  if (reply && reply.ok) renderKeysBanner((await reply.json()).missing_keys);
+}
+
+async function refreshPlan() {
+  if (!$("text").value.trim()) {
+    $("cost").textContent = "";
+    if (!currentJob) renderRows([]);
+    updateNextRun();
+    return;
+  }
+  const reply = await api("/api/plan", formBody());
+  if (!reply) { setMessage(UNREACHABLE, "error"); return; }
+  if (!reply.ok) { setMessage("Could not plan these IOCs (server answered " + reply.status + "). Edit the text to try again.", "error"); return; }
+  const data = await reply.json();
+  renderKeysBanner(data.missing_keys);
+  lastPlan = data;
+  updateRunButton();
+  setIfChanged($("cost"), data.cost ? "Cost: " + data.cost : "No IOCs found.");
+  if (!currentJob) {
+    setMessage(data.ignored.length ? "Ignored: " + data.ignored.join("; ") : "", "warn");
+    renderRows(data.rows);
+  }
+}
+
+// While a run is in progress, the inputs are locked so the job is not lost.
+function setRunning(value) {
+  running = value;
+  for (const id of ["text", "incident", "nocache"]) $(id).disabled = value;
+  for (const radio of document.querySelectorAll('input[name="vt"]')) radio.disabled = value;
+  updateRunButton();
+}
+
+function schedulePlan() {
+  if (running) return;
+  lastPlan = null;          // Run waits for the fresh plan, so its label is never stale
+  updateRunButton();        // results of the last run stay; the Next-run line explains them
+  clearTimeout(planTimer);
+  planTimer = setTimeout(refreshPlan, 500);
+}
+
+function finishRun() {
+  runProgress = null;
+  $("stop").hidden = true;
+  const focusWasOnRunControls = [$("stop"), $("message"), document.body].includes(document.activeElement);
+  setRunning(false);
+  // Focus goes to the status message, never to the Run button: two Enter presses must not
+  // start a new run that sends IOCs to VirusTotal.
+  if (focusWasOnRunControls) $("message").focus();
+}
+
+async function poll() {
+  const reply = await api("/api/job/" + currentJob);
+  if (!reply) { setMessage(UNREACHABLE, "error"); finishRun(); return; }
+  if (!reply.ok) {
+    setMessage("Lost contact with the run (server answered " + reply.status + "). Answers so far are cached: press the button again to continue.", "error");
+    finishRun();
+    return;
+  }
+  const data = await reply.json();
+  rowsFinal = data.done;    // sort only once nothing moves any more
+  lastRunStopped = Boolean(data.stopped);
+  renderRows(data.rows);
+  runProgress = data.progress;
+  if (data.done) {
+    finishRun();
+    $("download").disabled = false;
+    $("text").classList.add("compact");    // results take the space, once per finished run
+    let cacheNote = "";
+    if ($("nocache").checked) {             // one-off choice: the next run uses the cache again
+      $("nocache").checked = false;
+      cacheNote = " “Ignore cache” is switched back off for the next run.";
+    }
+    if (data.stopped) {
+      setMessage("Stopped. Answers so far are kept and cached; the rest are marked not checked." + cacheNote, "warn");
+    } else if (data.error) {
+      setMessage(data.error + ". Unanswered lookups are marked not checked; press the button again to retry." + cacheNote, "error");
+    } else {
+      setMessage(doneMessage() + cacheNote, "success");
+    }
+    refreshPlan();   // answers are cached now: Run's label and the cost line show the real (lower) cost
+  } else {
+    updateRunButton();
+    const reused = runProgress && runProgress.reused ? " " + plural(runProgress.reused, "answer") + " reused from the cache." : "";
+    const text = (runSendsVt ? "Checking… VirusTotal allows 4 lookups per minute on a free key." : "Checking…") + reused;
+    if ($("message").textContent !== text) setMessage(text);
+    pollTimer = setTimeout(poll, 2000);
+  }
+}
+
+async function stopRun() {
+  $("message").focus();                     // Stop is about to be disabled: keep focus off <body>
+  $("stop").disabled = true;
+  $("stop").textContent = "Stopping…";
+  const reply = await api("/api/job/" + currentJob + "/stop", {});
+  if (!reply) setMessage(UNREACHABLE, "error");
+  // the next poll sees the job finish and resets both buttons
+}
+
+async function startRun() {
+  clearTimeout(pollTimer);
+  const sendsVt = !vtOff() && lastPlan && planCounts(lastPlan).vt_calls_max > 0;
+  runSendsVt = Boolean(sendsVt);
+  const previous = { job: currentJob, rows: lastRows, input: runInput };
+  runInput = inputKey();
+  openLinks.clear();
+  rowsFinal = false;
+  currentJob = null;
+  if (lastPlan) renderRows(lastPlan.rows);  // old verdicts must not sit under "Starting…"
+  const restore = () => {                   // the run never started: show the previous results again
+    currentJob = previous.job;
+    runInput = previous.input;
+    rowsFinal = true;
+    renderRows(previous.rows);
+  };
+  runProgress = null;
+  setRunning(true);
+  $("stop").hidden = false;
+  $("stop").disabled = false;
+  $("stop").textContent = "Stop";
+  $("stop").focus();                        // Run just got disabled: keep focus on a live control
+  $("download").disabled = true;
+  setMessage(sendsVt ? "Checking… VirusTotal allows 4 lookups per minute on a free key." : "Checking…");
+  const reply = await api("/api/run", formBody());
+  if (!reply) { setMessage(UNREACHABLE, "error"); finishRun(); restore(); return; }
+  if (reply.status === 409) { setMessage("Another run is still going (probably in another tab). Wait for it to finish, then try again.", "warn"); finishRun(); restore(); return; }
+  if (!reply.ok) { setMessage("Could not start the run (server answered " + reply.status + "). Try again.", "error"); finishRun(); restore(); return; }
+  currentJob = (await reply.json()).job;
+  poll();
+}
+
+async function downloadCsv() {
+  const reply = await api("/api/job/" + currentJob + "/csv");
+  if (!reply) { setMessage(UNREACHABLE, "error"); return; }
+  if (!reply.ok) { setMessage("Could not download the CSV (server answered " + reply.status + "). Try again.", "error"); return; }
+  const disposition = reply.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(await reply.blob());
+  link.download = match ? match[1] : "ioc-enrich.csv";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+$("text").addEventListener("input", schedulePlan);
+$("text").addEventListener("focus", () => $("text").classList.remove("compact"));   // grows, and stays grown
+// Cmd/Ctrl + Enter runs, but only once the fresh plan has enabled the button; Esc stops a run.
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && running && currentJob && !$("stop").disabled) {
+    event.preventDefault();
+    stopRun();
+    return;
+  }
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !$("run").disabled) {
+    event.preventDefault();
+    startRun();
+  }
+});
+for (const radio of document.querySelectorAll('input[name="vt"]')) {
+  radio.addEventListener("change", () => {
+    updateRunButton();                      // instant: both switch positions are already in the plan
+    if (currentJob) renderRows(lastRows);   // the VirusTotal manual links follow the switch
+    clearTimeout(planTimer);
+    planTimer = setTimeout(refreshPlan, 300);   // fresh rows and cost line follow shortly
+  });
+}
+$("nocache").addEventListener("change", schedulePlan);
+$("incident").addEventListener("change", schedulePlan);   // domain age depends on it: re-plan, mark results stale
+$("run").addEventListener("click", startRun);
+$("stop").addEventListener("click", stopRun);
+$("download").addEventListener("click", downloadCsv);
+for (const radio of document.querySelectorAll('input[name="show"]')) {
+  radio.addEventListener("change", () => {
+    renderRows(lastRows);
+    if ($("message").textContent.startsWith("Done.")) setMessage(doneMessage(), "success");   // follows the filter
+  });
+}
+loadKeysBanner();
+</script>
+</body>
+</html>

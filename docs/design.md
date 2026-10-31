@@ -1,0 +1,56 @@
+# ioc-enrich — design (2026-10-31)
+
+**Why:** speed up the enrichment step of a SOC Tier 1 investigation. Paste IOCs from anywhere, get lookups from public threat-intel APIs, write rows in the analyst's existing `iocs.csv` format. Also a public portfolio project, so code must be readable, commented where non-obvious, no clever tricks.
+
+**Goals:** CLI + small local web page, one shared engine. Python ≥3.11, **standard library only** (no third-party packages, ever, without owner OK). Tests with `unittest`, never hitting live APIs.
+**Non-goals (v1):** IPv6, WHOIS client, merge/upload on the web page, verdicts.
+**Anti-goals (failure even if it works):** contacting an IOC (resolve/fetch/connect); submitting, rescanning or downloading anything; scraping any site; printing/logging keys; crashing or silently skipping on rate limits; tool saying "malicious/clean" (the analyst decides).
+
+## Flow
+1. **Input:** stdin, file arg, or page textarea. Refang `hxxp(s)`, `[.]`, `[:]`, `(.)`.
+2. **Extract + classify:** `domain` (full hostname as written), `ip` (IPv4), `url`, `md5`, `sha1`, `sha256`. A URL yields a `url` row **and** a `domain` row for its host. Domain candidates must end in a real TLD (bundled IANA list); TLDs that collide with file extensions (built-in list: `zip mov py sh md pl rs ps so cc`) count only if defanged, inside a URL, or starting with `www.`; otherwise listed on screen as `ignored (looks like filename)` so the analyst can re-add them. IPv6 → `skipped (IPv6 not supported yet)`.
+3. **Filter:** exact dedupe; private/reserved IPs (`ipaddress`) → screen only `skipped (private)`, no CSV row; shared-CDN IPs (bundled Cloudflare/Fastly/CloudFront ranges) → no VT, `role` = `shared CDN (Cloudflare) - do not block` on new rows; allowlist `~/.config/ioc-enrich/allowlist.txt` (one domain per line, covers subdomains) → row with `allowlisted - not checked`.
+4. **Lookups:** each IOC only against sources supporting its type (Appendix A). Non-VT sources run in parallel threads; VT runs in one worker behind a global limiter (default 4/min, configurable). RDAP gets the registered domain (last two labels, plus a small built-in list of 2-part suffixes like `co.uk`); others get the full hostname.
+5. **Output:** CSV, screen summary (one line per IOC: `flagged by: VT 2/92, ThreatFox` / `flagged by: none` / `not checked`, then enrichment; "flagged" = VT malicious+suspicious ≥ 1, listed in ThreatFox/URLhaus/MalwareBazaar, AbuseIPDB ≥ 1 report, OTX ≥ 1 pulse — rules written in the README; no HIT/verdict words), manual-check links per IOC.
+
+## CSV
+Columns: `type,value,first_seen_utc,frame,context,role,confidence,enrichment,checked_on`. Real file (`~/learning/soc-analyst/writeups/2026-08-09-first-to-last/iocs.csv`) is the reference fixture: UTF-8, standard `csv` quoting, `first_seen_utc` = `YYYY-MM-DD HH:MM:SS` UTC, every dot in `value` defanged as `[.]`, URLs appear inside `context` as `hxxp://…`, no duplicate rows. Tool writes `type`, `value` (defanged: `[.]`, `hxxp`, `[:]`), `enrichment`, `checked_on` (YYYY-MM-DD), and `role` only for new CDN rows.
+**Enrichment** (fixed order, omit sources not applicable to the type): `ThreatFox: not listed; VT 2/92 (malware, phishing); URLhaus: …; MalwareBazaar: …; OTX: 2 pulses; AbuseIPDB: 35% (12 reports); created 2026-05-15 via RDAP (86 d before incident)`. Words in VT brackets = distinct result words from flagging engines. Not-checked states are explicit: `VT: skipped (shared CDN)`, `VT: not checked (quota)`, `VT: off (--no-vt)`.
+**Domain age:** RDAP → else VT `creation_date` (`via VT`) → else `age n/a`. *(Builder-check calls:)* VT rarely has `creation_date` for a subdomain, so when RDAP has no server for the TLD and the hostname ≠ registered domain, make one extra VT call on the registered domain (`independent.ie`). `update-lists` also bundles IANA's RDAP bootstrap (`https://data.iana.org/rdap/dns.json`), so `--dry-run` knows exactly which TLDs lack RDAP and counts these extra calls in the cost line.
+**`checked_on`** = the oldest date of the results actually used in that row (a 5-day-old cached answer gives its own date, not today); the screen marks cached results `(cached)`.
+**VT bracket words:** URLs/domains/IPs → distinct `result` words of flagging engines; file hashes → `popular_threat_classification.suggested_threat_label` (e.g. `VT 45/72 (trojan.xloader/formbook)`). Reference date = the row's own `first_seen_utc`, else `--incident-date`, else no "d before".
+**`--merge file.csv`:** looks up only the IOCs in this run's input; with no input it re-checks every lookup-able row in the file (cache + `--dry-run` keep cost visible). Match on (type, refanged value); owner columns never touched; `enrichment`/`checked_on` replaced only when every applicable source answered this run — otherwise the old cell is kept as is and the screen says `kept old enrichment (incomplete run)`; unknown types (e.g. `user_agent`) pass through untouched; new IOCs appended. Output always goes to a new file (default `ioc-enrich-YYYY-MM-DD-HHMM.csv` or `-o`); refuse to overwrite any existing file.
+
+## Quota, cache, resume
+SQLite cache `~/.cache/ioc-enrich/cache.sqlite`, one row per (source, IOC) with timestamp, TTL 7 days, `--no-cache` bypass. Cache is the progress file: each answer is stored as it arrives. HTTP 429 → wait (honour `Retry-After` if present), retry. VT per-minute vs daily 429 look the same, so the tool counts its own VT calls per UTC day in the cache DB: a 429 under the daily limit = per-minute → wait 60 s and retry; at the daily limit, or 3 consecutive 429s after waiting = daily quota exhausted. (Never call `/users/{key}/overall_quotas`: it puts the key in the URL.) VT daily quota exhausted → stop VT for this run, mark rows `VT: not checked (quota)`, final report lists them; rerun picks up only those. `--deep`: VT `resolutions` (domain/IP, last 10) or `contacted_domains` + `contacted_ips` (hash), each +1 VT call, printed in a "Related" screen section only. `--dry-run`: no keys needed, no network; shows classification, skips, per-source query list, VT call count and time estimate. `--no-vt`: OPSEC-quiet run (VT adds every queried IOC to its dataset).
+
+## Web page (`ioc-enrich serve`)
+`http.server` on `127.0.0.1` only. Prints URL with random token (`/?t=…`); requests missing the token or with foreign `Host`/`Origin` are refused. One plain HTML/JS page: paste box, incident date, "No VT" + "Ignore cache" checkboxes, Run → cost line (`12 IOCs → 9 VT calls, ~2 min 15 s`) → results table (type, value, status, enrichment) filling in live, per-row "links" toggle, "Download CSV". Same engine and cache as the CLI.
+
+## Keys, files, commands
+Keys: env vars (`VT_API_KEY`, `ABUSECH_AUTH_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`), then `~/.config/ioc-enrich/keys.env`. A source with no key is reported `not checked (no key)`, never fatal. `.gitignore` (incl. `.env`, `.venv`, cache) before first commit. `pyproject.toml` with no deps; `pip install -e .` in `.venv` gives `ioc-enrich`; `python -m ioc_enrich` also works. `ioc-enrich update-lists` refreshes bundled CDN ranges + IANA TLD list from their official URLs (dated files). MIT license. Git: commit only when owner asks, as `Vlad G. <114040348+dancemonk@users.noreply.github.com>`, no AI credit.
+
+## Done means
+`--help` clear; README (purpose, getting each free key, usage, safety rules incl. VT dataset note + non-commercial terms, limitations); unit tests for refang/defang, extraction, classification, filtering, CSV merge, enrichment formatting, rate limiter, cache TTL, 429/quota handling, server token check — all passing, using recorded fake responses. Sample `www.grinswakebthu[.]info, www.taibeinan[.]cc, www.independent[.]ie, 146.59.71[.]167, 172.64.155[.]76, 172.16.8[.]49` with `--dry-run` (no keys) and live: private IP skipped, Cloudflare IP flagged + no VT, rest queried, `.ie` age via VT fallback.
+
+**Left to the builder:** module layout, thread/worker structure, live-update mechanism for the page (polling or SSE), CLI flag names beyond those above, exact time-estimate math, screen colouring.
+
+---
+
+## Appendix A — API reference (verified from official docs 2026-10-31; re-check during build)
+
+| Source | Lookup (only these) | Auth header | Free limits |
+|---|---|---|---|
+| VirusTotal v3 | `GET /api/v3/domains/{d}`, `/ip_addresses/{ip}`, `/files/{hash}`, `/urls/{base64url-no-padding}` | `x-apikey` | 4/min, 500/day; non-commercial; 429 `QuotaExceededError`, 404 `NotFoundError` |
+| ThreatFox | `POST https://threatfox-api.abuse.ch/api/v1/` JSON `{"query":"search_ioc","search_term":v,"exact_match":true}` or `{"query":"search_hash","hash":h}` (md5/sha256 only, no sha1) | `Auth-Key` | fair use |
+| URLhaus | `POST https://urlhaus-api.abuse.ch/v1/url/` (form `url`), `/v1/host/` (`host`), `/v1/payload/` (`md5_hash`/`sha256_hash`) | `Auth-Key` | fair use |
+| MalwareBazaar | `POST https://mb-api.abuse.ch/api/v1/` form `query=get_info&hash=h` | `Auth-Key` | fair use |
+| OTX | `GET https://otx.alienvault.com/api/v1/indicators/{IPv4\|domain\|hostname\|url\|file}/{v}/general` | `X-OTX-API-KEY` | undocumented (~10k/h reported) |
+| AbuseIPDB | `GET https://api.abuseipdb.com/api/v2/check?ipAddress=…&maxAgeInDays=90` | `Key` + `Accept: application/json` | 1,000/day; non-commercial |
+| RDAP | `GET https://rdap.org/domain/{d}` (follow redirect; 404 = no RDAP for TLD) | none | 10 per 10 s |
+
+**Never call (blocklist, enforce in code):** VT `POST /files`, `/files/upload_url`, any `/analyse`, `/files/{id}/download*`, `POST /urls`, comments/votes; ThreatFox `submit_ioc`; URLhaus `/v1/download/`, submission API, exports; MalwareBazaar `get_file`, uploads; OTX `submit_*`, `pulses/create`; AbuseIPDB `report`, `bulk-report`, `clear-address`.
+**Fields:** VT `last_analysis_stats`, `last_analysis_results[*].result`, `creation_date`, `registrar`, `popular_threat_classification`; ThreatFox `malware_printable`, `threat_type`; URLhaus `query_status`, `url_status`, `threat`, `tags`; MalwareBazaar `signature`, `tags`, `first_seen`; OTX `pulse_info.count`; AbuseIPDB `abuseConfidenceScore`, `totalReports`, `isp`, `usageType`; RDAP `events[eventAction=registration].eventDate`, `entities[roles∋registrar]` vcard `fn`.
+**RDAP gaps:** `.ie .io .co .de .me .ru .cn` absent from IANA bootstrap (2026-10-28); `.cc` present.
+**Lists:** Cloudflare `https://www.cloudflare.com/ips-v4/`; Fastly `https://api.fastly.com/public-ip-list`; CloudFront `https://ip-ranges.amazonaws.com/ip-ranges.json` (`service=="CLOUDFRONT"`); IANA TLDs `https://data.iana.org/TLD/tlds-alpha-by-domain.txt`.
+**Manual links (format unverified — confirm in browser during build):** VT `https://www.virustotal.com/gui/{domain|ip-address|file}/{v}`, URLs via `/gui/search/{urlencoded}`; tria.ge `https://tria.ge/s?q={domain|ip|url|md5|sha1|sha256}:{v}`; ThreatFox `https://threatfox.abuse.ch/browse.php?search=ioc%3A{v}`; URLhaus `https://urlhaus.abuse.ch/browse.php?search={v}`; MalwareBazaar `https://bazaar.abuse.ch/browse.php?search=sha256%3A{h}`; OTX `https://otx.alienvault.com/indicator/{type}/{v}`; AbuseIPDB `https://www.abuseipdb.com/check/{ip}`.

@@ -1,0 +1,24 @@
+{
+ "data": {
+  "id": "e3b0",
+  "type": "file",
+  "attributes": {
+   "last_analysis_stats": {
+    "malicious": 40,
+    "suspicious": 5,
+    "harmless": 60,
+    "undetected": -13,
+    "timeout": 0
+   },
+   "last_analysis_results": {
+    "EngineA": {
+     "category": "malicious",
+     "result": "Trojan.Win32.Formbook.abc"
+    }
+   },
+   "popular_threat_classification": {
+    "suggested_threat_label": "trojan.xloader/formbook"
+   }
+  }
+ }
+}
