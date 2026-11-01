@@ -19,8 +19,12 @@ _Avoid_: whitelist, safelist
 ## Lookups
 
 **Source**:
-One public threat-intel service the tool may ask about an IOC (VirusTotal, ThreatFox, URLhaus, MalwareBazaar, OTX, AbuseIPDB, RDAP).
+One public threat-intel service the tool may ask about an IOC (VirusTotal, ThreatFox, URLhaus, MalwareBazaar, OTX, AbuseIPDB, RDAP, Shodan InternetDB).
 _Avoid_: provider, feed, API
+
+**Info-only source**:
+A source that describes an IOC (RDAP: registration date; Shodan InternetDB: open ports, known vulns) but can never flag it. Its answer alone never makes "flagged by: none".
+_Avoid_: clean source, passive source
 
 **Lookup**:
 One question to one source about one IOC, together with its intended outcome: asked, skipped, or not checked.

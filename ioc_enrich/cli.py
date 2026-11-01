@@ -1,4 +1,4 @@
-"""Command line: `ioc-enrich [FILE] ...`, `ioc-enrich serve`, `ioc-enrich update-lists`."""
+"""Command line: `ioc-enrich [FILE] ...`, `ioc-enrich serve`, `ioc-enrich keys`, `ioc-enrich update-lists`."""
 
 import argparse
 import sys
@@ -29,14 +29,15 @@ EPILOG = """\
 commands:
   ioc-enrich [FILE] [options]   enrich IOCs from FILE or stdin (default)
   ioc-enrich serve [--port N]   local web page on 127.0.0.1
+  ioc-enrich keys               save your API keys (asks for each one)
   ioc-enrich update-lists       refresh bundled TLD / RDAP / CDN lists
 
 example:
   echo "www.taibeinan[.]cc 146.59.71[.]167" | ioc-enrich --dry-run
 
 Lookup only: never contacts an IOC, never submits anything for scanning.
-API keys: env vars VT_API_KEY, ABUSECH_AUTH_KEY, OTX_API_KEY, ABUSEIPDB_API_KEY
-or ~/.config/ioc-enrich/keys.env
+API keys: run `ioc-enrich keys`, or set env vars VT_API_KEY, ABUSECH_AUTH_KEY,
+OTX_API_KEY, ABUSEIPDB_API_KEY, or write ~/.config/ioc-enrich/keys.env
 """
 
 
@@ -221,6 +222,9 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None, stderr=None,
         port_parser = argparse.ArgumentParser(prog="ioc-enrich serve")
         port_parser.add_argument("--port", type=int, default=8765)
         return serve(port_parser.parse_args(argv[1:]).port)
+    if argv and argv[0] == "keys":
+        from ioc_enrich.setup_keys import main as keys_main
+        return keys_main(argv[1:], out=out, env=os.environ if env is None else env)
     if argv and argv[0] == "update-lists":
         from ioc_enrich.update_lists import main as update_main
         return update_main()

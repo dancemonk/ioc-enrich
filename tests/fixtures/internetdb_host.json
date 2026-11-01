@@ -1,0 +1,8 @@
+{
+    "ip": "146.59.71.167",
+    "ports": [22, 80, 443],
+    "cpes": ["cpe:/a:igor_sysoev:nginx", "cpe:/a:openbsd:openssh:7.4"],
+    "hostnames": ["vps-1234.example.net"],
+    "tags": ["vpn"],
+    "vulns": ["CVE-2017-15906"]
+}

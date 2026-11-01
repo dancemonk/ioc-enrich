@@ -88,6 +88,13 @@ class OutcomeTest(unittest.TestCase):
         self.assertEqual(found["VT"], ("ask", ""))
         self.assertEqual(found["RDAP"], ("ask", ""))          # RDAP needs no key
 
+    def test_internetdb_asked_for_every_public_ip_without_a_key(self):
+        plan = make_plan(keyed_sources=set())
+        self.assertEqual(outcomes(item(plan, "146.59.71.167"))["InternetDB"], ("ask", ""))
+        self.assertEqual(outcomes(item(plan, "172.64.155.76"))["InternetDB"], ("ask", ""))   # shared CDN too
+        self.assertNotIn("InternetDB", outcomes(item(plan, "www.taibeinan.cc")))           # IPs only
+        self.assertEqual(item(plan, "172.16.8.49").lookups, [])                            # private: never sent
+
     def test_dry_run_assumes_every_key(self):
         found = outcomes(item(make_plan(keyed_sources=None), "146.59.71.167"))
         self.assertTrue(all(outcome == "ask" for outcome, _ in found.values()))
@@ -168,11 +175,11 @@ class CompletenessTest(unittest.TestCase):
 class ProgressTest(unittest.TestCase):
     def test_counts_answers_and_due_follow_ups(self):
         plan = make_plan([IOC("domain", "www.independent.ie"), IOC("ip", "146.59.71.167")])
-        self.assertEqual(plan.progress({}), {"done": 0, "total": 9, "vt_done": 0, "vt_total": 2, "reused": 0})
+        self.assertEqual(plan.progress({}), {"done": 0, "total": 10, "vt_done": 0, "vt_total": 2, "reused": 0})
         ie = IOC("domain", "www.independent.ie")
         # VT answered without a creation date: the VT-age follow-up becomes due (+1 VT lookup)
         results = {ie: [answer("VT", creation_date=None), answer("OTX")]}
-        self.assertEqual(plan.progress(results), {"done": 2, "total": 10, "vt_done": 1, "vt_total": 3, "reused": 0})
+        self.assertEqual(plan.progress(results), {"done": 2, "total": 11, "vt_done": 1, "vt_total": 3, "reused": 0})
 
     def test_cached_lookups_are_not_counted_as_sent(self):
         # Bug: "Sending to VirusTotal · 6 of 8" after the plan promised 3 new VT requests
@@ -181,7 +188,7 @@ class ProgressTest(unittest.TestCase):
         reused = {(ip, "VT"), (ip, "OTX")}
         results = {ip: [answer("VT"), answer("OTX")]}
         self.assertEqual(plan.progress(results, reused=reused),
-                         {"done": 0, "total": 7, "vt_done": 0, "vt_total": 1, "reused": 2})
+                         {"done": 0, "total": 8, "vt_done": 0, "vt_total": 1, "reused": 2})
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ MAX_429_IN_A_ROW = 3
 MAX_WAIT_SECONDS = 120        # a longer Retry-After means a daily limit: stop asking that source
 OTHER_SOURCE_WORKERS = 4
 RDAP_PER_MINUTE = 60          # rdap.org allows 10 requests per 10 seconds
+INTERNETDB_PER_MINUTE = 60    # no published limit: stay polite with long IP lists
 
 
 @dataclass
@@ -133,6 +134,7 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
 
     # ---- other sources: thread pool ---------------------------------------
     rdap_limiter = RateLimiter(RDAP_PER_MINUTE, clock=clock, sleep=pause)
+    internetdb_limiter = RateLimiter(INTERNETDB_PER_MINUTE, clock=clock, sleep=pause)
 
     def other_job(lookup: Lookup) -> None:
         source, ioc = lookup.source, lookup.ioc
@@ -147,6 +149,8 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
             try:
                 if source == "RDAP":
                     rdap_limiter.wait()
+                elif source == "InternetDB":
+                    internetdb_limiter.wait()
                 if stop.is_set():
                     return
                 result = LOOKUPS[source](ioc, _key(source, keys), http, today())

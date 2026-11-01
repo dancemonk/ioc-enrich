@@ -28,7 +28,7 @@ from ioc_enrich.sources.vt import relationships_for
 # Which sources support which IOC type (see docs/design.md, Appendix A).
 SOURCES_BY_TYPE = {
     "domain": ["ThreatFox", "VT", "URLhaus", "OTX", "RDAP"],
-    "ip": ["ThreatFox", "VT", "URLhaus", "OTX", "AbuseIPDB"],
+    "ip": ["ThreatFox", "VT", "URLhaus", "OTX", "AbuseIPDB", "InternetDB"],
     "url": ["VT", "URLhaus", "OTX"],
     "md5": ["ThreatFox", "VT", "URLhaus", "MalwareBazaar", "OTX"],
     "sha1": ["VT", "MalwareBazaar", "OTX"],          # ThreatFox and URLhaus do not take SHA1

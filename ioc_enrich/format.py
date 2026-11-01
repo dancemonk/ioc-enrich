@@ -7,13 +7,33 @@ from ioc_enrich.lookup_plan import PlannedIOC
 from ioc_enrich.models import IOC, SourceResult
 
 # Order of the parts in the enrichment cell (see docs/design.md).
-PART_ORDER = ["ThreatFox", "VT", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB"]
+PART_ORDER = ["ThreatFox", "VT", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB", "InternetDB"]
 # Order in the "flagged by" line: VT first, as in the design's example.
 FLAG_ORDER = ["VT", "ThreatFox", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB"]
+# Sources that describe an IOC but can never flag it. Their answers alone are not a "none".
+INFO_SOURCES = {"RDAP", "InternetDB"}
 
 
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def _shortened(items: list, limit: int, sep: str) -> str:
+    """'22 80 443' or, past the limit, '1 2 3 +9'."""
+    shown = sep.join(str(item) for item in items[:limit])
+    return shown + (f"{sep}+{len(items) - limit}" if len(items) > limit else "")
+
+
+def _host_parts(fields: dict) -> list[str]:
+    """InternetDB facts: ['ports 22 80 443', '1 vuln (CVE-2017-15906)', 'tag vpn']."""
+    parts = []
+    if fields.get("ports"):
+        parts.append("ports " + _shortened(fields["ports"], 10, " "))
+    if fields.get("vulns"):
+        parts.append(f"{_plural(len(fields['vulns']), 'vuln')} ({_shortened(fields['vulns'], 3, ', ')})")
+    if fields.get("tags"):
+        parts.append(("tag " if len(fields["tags"]) == 1 else "tags ") + " ".join(fields["tags"]))
+    return parts
 
 
 def _vt_score(fields: dict) -> str:
@@ -29,6 +49,8 @@ def _found_text(result: SourceResult) -> str:
             return "VT: not found"
         if source == "OTX":
             return "OTX: 0 pulses"
+        if source == "InternetDB":
+            return "InternetDB: no data"
         return f"{source}: not listed"
     if source == "VT":
         words = f" ({', '.join(f['words'])})" if f.get("words") else ""
@@ -47,6 +69,8 @@ def _found_text(result: SourceResult) -> str:
         return f"OTX: {_plural(f.get('pulses', 0), 'pulse')}"
     if source == "AbuseIPDB":
         return f"AbuseIPDB: {f.get('score', 0)}% ({_plural(f.get('reports', 0), 'report')})"
+    if source == "InternetDB":
+        return "InternetDB: " + (", ".join(_host_parts(f)) or "no open ports seen")
     return source
 
 
@@ -116,7 +140,7 @@ def flagged_by(results: list[SourceResult]) -> str:
             labels.append(name)
     if labels:
         return "flagged by: " + ", ".join(labels)
-    if any(r.status in ("ok", "not_listed") for r in results):
+    if any(r.status in ("ok", "not_listed") and r.source not in INFO_SOURCES for r in results):
         return "flagged by: none"
     return "not checked"
 
@@ -173,13 +197,14 @@ SOURCE_NAMES = {
     "OTX": ("OTX", "AlienVault OTX"),
     "AbuseIPDB": ("AIPDB", "AbuseIPDB"),
     "RDAP": ("RDAP", "RDAP"),
+    "InternetDB": ("IDB", "Shodan InternetDB"),
 }
 
 
 def source_states(item: PlannedIOC, results: list[SourceResult], cached: set[str] = frozenset()) -> list[dict]:
     """One entry per planned source: what it said (or will be asked), as data, not prose.
 
-    state: "flagged" | "clean" | "info" (RDAP answered) | "planned" | "cached" | "skipped" | "not_checked".
+    state: "flagged" | "clean" | "info" (RDAP or InternetDB answered) | "planned" | "cached" | "skipped" | "not_checked".
     cached: sources whose answer is already in the cache (plan view: no new request will be sent).
     Sources without an API key are left out: the page shows missing keys once, in a banner.
     """
@@ -202,6 +227,9 @@ def source_states(item: PlannedIOC, results: list[SourceResult], cached: set[str
         elif lookup.source == "RDAP":
             created = answer.fields.get("created")
             state, detail = "info", f"created {created}" if created else "no registration date"
+        elif lookup.source == "InternetDB":
+            text = _found_text(answer).removeprefix("InternetDB: ")
+            state, detail = "info", text
         else:
             state, detail = ("flagged" if answer.flagged else "clean"), _found_text(answer)
             detail = detail.removeprefix(f"{lookup.source}: ")   # the chip already names the source
@@ -221,14 +249,15 @@ STRONG_SOURCES = {"VT", "ThreatFox", "URLhaus", "MalwareBazaar"}
 
 def result_kind(results: list[SourceResult]) -> str:
     """'flag' (strong evidence), 'weak' (only OTX/AbuseIPDB flagged), 'clean' (answered,
-    nobody flagged) or 'skip' (nothing answered)."""
+    nobody flagged), 'info' (only RDAP/InternetDB answered) or 'skip' (nothing answered)."""
     if any(r.flagged and r.source in STRONG_SOURCES for r in results):
         return "flag"
     if any(r.flagged for r in results):
         return "weak"
-    if any(r.status in ("ok", "not_listed") for r in results):
+    answered = [r for r in results if r.status in ("ok", "not_listed")]
+    if any(r.source not in INFO_SOURCES for r in answered):
         return "clean"
-    return "skip"
+    return "info" if answered else "skip"
 
 
 def strong_gaps(results: list[SourceResult]) -> list[str]:
@@ -265,7 +294,7 @@ def _chip_metric(answer: SourceResult) -> str:
 
 
 def row_details(ioc: IOC, results: list[SourceResult], ref_date: date | None) -> list[str]:
-    """Facts the chips do not already show: domain age, registrar, AbuseIPDB score,
+    """Facts the chips do not already show: domain age, registrar, AbuseIPDB score, open ports,
     and why a lookup was not checked (missing keys are left to the page's banner)."""
     by_source = {r.source: r for r in results}
     details = []
@@ -277,6 +306,12 @@ def row_details(ioc: IOC, results: list[SourceResult], ref_date: date | None) ->
     abuse = by_source.get("AbuseIPDB")
     if abuse and abuse.status == "ok":
         details.append(f"AbuseIPDB score {abuse.fields.get('score', 0)}%")
+    host = by_source.get("InternetDB")
+    if host and host.status == "ok":
+        parts = _host_parts(host.fields)
+        if parts and parts[0].startswith("ports"):
+            parts[0] = "open " + parts[0]
+        details.append(" · ".join(parts) or "no open ports seen")
     # Strong sources that were not asked are already named by the headline ("VT not asked (…)").
     unchecked = [f"{SOURCE_NAMES[name][0]} ({_web_reason(by_source[name].reason)})" for name in PART_ORDER + ["RDAP"]
                  if name in by_source and by_source[name].status == "not_checked"

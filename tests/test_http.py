@@ -50,6 +50,7 @@ class CheckAllowedTest(unittest.TestCase):
             ("GET", "https://otx.alienvault.com/api/v1/indicators/hostname/www.x.com/general", None),
             ("GET", "https://api.abuseipdb.com/api/v2/check?ipAddress=1.2.3.4&maxAgeInDays=90", None),
             ("GET", "https://rdap.org/domain/taibeinan.cc", None),
+            ("GET", "https://internetdb.shodan.io/1.2.3.4", None),
             ("GET", "https://data.iana.org/TLD/tlds-alpha-by-domain.txt", None),
             # IOC values that merely contain a forbidden word are still lookups:
             ("GET", f"{VT}/domains/download.example.com", None),

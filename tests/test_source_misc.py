@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from ioc_enrich.models import IOC
-from ioc_enrich.sources import LOOKUPS, abuseipdb, otx, rdap
+from ioc_enrich.sources import KEY_FIELD, LOOKUPS, abuseipdb, internetdb, otx, rdap
 from tests.fakes import FakeHttp, json_response
 
 FIX = Path(__file__).parent / "fixtures"
@@ -56,6 +56,38 @@ class AbuseIpdbTest(unittest.TestCase):
         self.assertEqual((r.status, r.flagged), ("ok", False))
 
 
+IDB = "https://internetdb.shodan.io/"
+
+
+class InternetDbTest(unittest.TestCase):
+    def test_lookup_needs_no_key_and_never_flags(self):
+        http = FakeHttp({("GET", IDB): fixture("internetdb_host.json")})
+        r = internetdb.lookup(IOC("ip", "146.59.71.167"), None, http, TODAY)
+        self.assertEqual(http.calls[0][1], IDB + "146.59.71.167")
+        self.assertEqual(r.status, "ok")
+        self.assertEqual(r.fields, {"ports": [22, 80, 443], "vulns": ["CVE-2017-15906"], "tags": ["vpn"],
+                                    "hostnames": ["vps-1234.example.net"]})
+        self.assertFalse(r.flagged)                     # open ports are information, not a flag
+        self.assertIs(LOOKUPS["InternetDB"], internetdb.lookup)
+        self.assertIsNone(KEY_FIELD["InternetDB"])
+
+    def test_404_is_not_listed(self):
+        http = FakeHttp({("GET", IDB): json_response({"detail": "No information available"}, status=404)})
+        self.assertEqual(internetdb.lookup(IOC("ip", "1.2.3.4"), None, http, TODAY).status, "not_listed")
+
+    def test_http_error_is_not_checked(self):
+        http = FakeHttp({("GET", IDB): json_response({}, status=500)})
+        r = internetdb.lookup(IOC("ip", "1.2.3.4"), None, http, TODAY)
+        self.assertEqual((r.status, r.reason), ("not_checked", "error: HTTP 500"))
+
+    def test_odd_shapes_are_ignored(self):
+        # Wrong types from the API must never break the enrichment text
+        data = {"ports": "22", "vulns": None, "tags": [1, "cdn"], "hostnames": [{"x": 1}]}
+        http = FakeHttp({("GET", IDB): json_response(data)})
+        r = internetdb.lookup(IOC("ip", "1.2.3.4"), None, http, TODAY)
+        self.assertEqual(r.fields, {"ports": [], "vulns": [], "tags": ["cdn"], "hostnames": []})
+
+
 class RdapTest(unittest.TestCase):
     def test_registered_domain_queried(self):
         http = FakeHttp({("GET", "https://rdap.org/domain/"): fixture("rdap_domain.json")})
@@ -79,7 +111,7 @@ class RdapTest(unittest.TestCase):
 
 class RegistryTest(unittest.TestCase):
     def test_all_sources_registered(self):
-        self.assertEqual(set(LOOKUPS), {"VT", "ThreatFox", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB", "RDAP"})
+        self.assertEqual(set(LOOKUPS), {"VT", "ThreatFox", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB", "RDAP", "InternetDB"})
 
 
 if __name__ == "__main__":

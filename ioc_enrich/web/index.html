@@ -4,25 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ioc-enrich</title>
+<script>
+  // Apply the saved theme before the page draws, so it never flashes the wrong one.
+  let savedTheme = null;
+  try { savedTheme = localStorage.getItem("ioc-enrich-theme"); } catch (e) { /* storage blocked: follow the system */ }
+  if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
+</script>
 <style>
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --text: #1d2228; --muted: #5d6773;
     --line: #d9dee4; --control-border: #7a848f; --accent: #1f5fbf; --on-accent: #ffffff; --on-warn: #ffffff; --hit: #b42318; --ok: #1a7f37; --warn: #9a6700; --weak: #6941c6;
   }
+  /* Dark: chosen on the page, or "Auto" while the system is dark. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #12161b; --panel: #1a2027; --text: #e3e8ee; --muted: #9aa5b1;
       --line: #2c353f; --control-border: #66727f; --accent: #6ea8fe; --on-accent: #0b1220; --on-warn: #1d1300; --hit: #ff8a80; --ok: #7ee2a8; --warn: #f2cc60; --weak: #b9a3f0;
     }
   }
+  :root[data-theme="dark"] {
+      --bg: #12161b; --panel: #1a2027; --text: #e3e8ee; --muted: #9aa5b1;
+      --line: #2c353f; --control-border: #66727f; --accent: #6ea8fe; --on-accent: #0b1220; --on-warn: #1d1300; --hit: #ff8a80; --ok: #7ee2a8; --warn: #f2cc60; --weak: #b9a3f0;
+  }
   :root { color-scheme: light dark; }   /* native controls (date picker icon) follow the theme */
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }   /* the hidden attribute wins over any display rule below */
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+  .theme-switch .segments label { font-size: 13px; }   /* same padding and height as the VirusTotal switch */
   .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+  .credit { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
   ::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -37,14 +53,22 @@
   textarea.compact { min-height: 64px; height: 64px; }
   textarea::placeholder { color: var(--muted); opacity: 1; }   /* browser default gray was 3.9:1 in dark */
   textarea:focus-visible { outline-offset: 0; }
-  .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 12px; }
+  .options { margin-top: 10px; }
+  .options summary { display: block; padding: 6px 0; line-height: 20px; cursor: pointer;   /* 32px; text wraps inline */
+                     color: var(--muted); font-size: 14px; }
+  .options summary::before { content: "▸"; display: inline-block; width: 1.1em; }   /* closed/open marker, same in every browser */
+  .options summary::-webkit-details-marker { display: none; }
+  .options[open] summary::before { content: "▾"; }
+  #options-state { color: var(--text); margin-left: 0.25em; }   /* what is set stays visible while closed */
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 4px; }
   .controls label { display: flex; gap: 8px; align-items: center; min-height: 32px; color: var(--muted);
                     font-size: 14px; cursor: pointer; }
   input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
   input[type=date] { min-height: 32px; padding: 4px 6px; border: 1px solid var(--control-border); border-radius: 6px;
                      background: var(--bg); color: var(--text); caret-color: var(--accent); }
+  button, input, select { font: inherit; }   /* controls use the page font, not the browser's Arial */
   button { min-height: 32px; padding: 7px 16px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent);
-           color: var(--on-accent); font-weight: 600; cursor: pointer; }
+           color: var(--on-accent); font-size: 14px; font-weight: 600; cursor: pointer; }
   /* Run row: the VirusTotal choice sits right next to the action it changes. */
   .run-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
              margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -65,6 +89,7 @@
   .vt-note { margin: 8px 0 0; font-size: 13px; color: var(--warn); }
   @media (pointer: coarse) {   /* touch screens: 44px targets, no keyboard hint */
     button, .controls label, input[type=date] { min-height: 44px; }
+    .options summary { padding: 12px 0; }   /* 44px */
     .segments label { min-height: 40px; }   /* + 2px track inset each side = 44px */
     .hint { display: none; }
   }
@@ -137,17 +162,28 @@
   .toggle { min-height: 24px; background: none; border: none; color: var(--accent); padding: 2px 0; font-weight: 400;
             font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   @media (pointer: coarse) { .toggle, .links a { min-height: 44px; } }   /* after the base rules, so it wins */
+  @media (pointer: coarse) { .theme-switch .segments label { min-height: 40px; } }   /* + 2px track inset = 44px */
   .bottom { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
   .note { color: var(--muted); font-size: 12px; }
   .banner { border: 1px solid var(--control-border); background: var(--panel);
             border-radius: 6px; padding: 10px 14px; margin: 0 0 16px; font-size: 14px; }
   .banner strong { color: var(--text); }
-  .banner code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .banner code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); white-space: nowrap; }
 </style>
 </head>
 <body>
 <main>
-  <h1>ioc-enrich</h1>
+  <header class="top">
+    <h1>ioc-enrich</h1>
+    <fieldset class="switch theme-switch">
+      <legend class="visually-hidden">Theme</legend>
+      <div class="segments">
+        <label><input type="radio" name="theme" value="auto" checked> Auto</label>
+        <label><input type="radio" name="theme" value="light"> Light</label>
+        <label><input type="radio" name="theme" value="dark"> Dark</label>
+      </div>
+    </fieldset>
+  </header>
   <p class="sub">Paste IOCs from anywhere (defanged is fine). Lookup only: nothing is ever sent to an IOC.</p>
 
   <div id="keys-banner" class="banner" role="status" hidden></div>
@@ -155,10 +191,13 @@
   <section class="panel">
     <label for="text" class="field-label">IOCs to check <span class="field-hint">· domains, IPs, URLs or hashes, defanged is fine</span></label>
     <textarea id="text" placeholder="www.taibeinan[.]cc, 146.59.71[.]167, hxxp://..." spellcheck="false"></textarea>
-    <div class="controls">
-      <label><span>Incident date <span class="field-hint">(for domain age)</span></span> <input type="date" id="incident"></label>
-      <label><input type="checkbox" id="nocache"> Ignore cache</label>
-    </div>
+    <details class="options">
+      <summary>Options<span id="options-state"></span></summary>
+      <div class="controls">
+        <label><span>Incident date <span class="field-hint">(domain age is shown as days before it)</span></span> <input type="date" id="incident"></label>
+        <label><input type="checkbox" id="nocache"> <span>Ignore cache <span class="field-hint">(ask every source again; uses VirusTotal quota)</span></span></label>
+      </div>
+    </details>
     <div class="run-row">
       <fieldset class="switch">
         <legend>VirusTotal</legend>
@@ -188,7 +227,7 @@
       </div>
     </fieldset>
     <span class="count" id="flag-count" aria-live="polite"></span>
-    <span class="legend">Strong: VirusTotal (VT), ThreatFox (TF), URLhaus (UH), MalwareBazaar (MB) · Weak signal: only AlienVault OTX (OTX) pulses or AbuseIPDB (AIPDB) reports · "so far": a strong source was not asked (VirusTotal off, no key, stopped, shared CDN), so a stronger hit is still possible.</span>
+    <span class="legend">Strong: VirusTotal (VT), ThreatFox (TF), URLhaus (UH), MalwareBazaar (MB) · Weak signal: only AlienVault OTX (OTX) pulses or AbuseIPDB (AIPDB) reports · "so far": a strong source was not asked (VirusTotal off, no key, stopped, shared CDN), so a stronger hit is still possible · Info only: RDAP (domain age), Shodan InternetDB (IDB: open ports, known vulns) describe an IOC but never flag it.</span>
   </div>
 
   <div class="table-wrap" id="table-wrap" hidden>
@@ -203,6 +242,8 @@
     <button id="download" class="secondary" disabled>Download CSV</button>
     <span class="note">The tool reports who flagged an IOC; the verdict is yours.</span>
   </div>
+
+  <footer class="credit">by Vlad Guliakin · MIT license</footer>
 </main>
 
 <script>
@@ -345,7 +386,7 @@ let rowsFinal = false; // true once the run has finished: then rows sort stronge
 let lastRunStopped = false;   // the shown results come from a stopped run
 // Strong first; a weak hit with strong sources still unasked ranks above a fully checked weak one.
 function tierRank(row) {
-  const order = { flag: 0, weak: 2, clean: 3, checking: 4, plan: 4, skip: 5 };
+  const order = { flag: 0, weak: 2, clean: 3, checking: 4, plan: 4, info: 4.5, skip: 5 };
   return row.kind === "weak" && (row.gaps || []).length ? 1 : order[row.kind];
 }
 
@@ -384,7 +425,7 @@ ICON_PATHS.weak = ICON_PATHS.flag;
 const CHIP = {
   flagged: { icon: "flag", words: "flagged" },
   clean: { icon: "clean", words: "not flagged" },
-  info: { icon: "info", words: "registration data" },
+  info: { icon: "info", words: "information only" },
   planned: { icon: "plan", words: "will be checked" },
   cached: { icon: "cached", words: "cached answer" },
   skipped: { icon: "skip", words: "skipped" },
@@ -414,6 +455,7 @@ function headline(row) {
   if (row.kind === "flag") return "Flagged · strong";
   if (row.kind === "weak") return notAsked ? "Flagged · weak so far, " + notAsked : "Flagged · weak signal";
   if (row.kind === "clean") return notAsked ? "Not flagged so far · " + notAsked : "Not flagged";
+  if (row.kind === "info") return "Info only · threat-intel sources not checked";
   if (row.kind === "plan") return "Will check";
   if (row.kind === "checking") return "Checking…";
   if (row.kind === "skip" && !row.skip && row.sources.every((s) => !["planned", "cached"].includes(s.state)) && !currentJob) {
@@ -577,13 +619,14 @@ function renderKeysBanner(missing) {
   banner.replaceChildren();
   if (!missing || !missing.length) { banner.hidden = true; return; }
   const title = document.createElement("strong");
-  title.textContent = "No API key for: " + missing.map((k) => k.name).join(", ") + ".";
+  title.textContent = "Missing API keys: " + missing.map((k) => k.name).join(", ") + ".";
   const text = document.createElement("div");
-  text.textContent = "These sources are not checked. Add the keys to ~/.config/ioc-enrich/keys.env, "
-    + "then restart ioc-enrich serve (see README, \"Free API keys\").";
-  const vars = document.createElement("code");
-  vars.textContent = missing.map((k) => k.env).join("  ");
-  banner.append(title, text, vars);
+  const command = document.createElement("code");
+  command.textContent = "ioc-enrich keys";
+  // The server re-reads the keys file on every request, so a reload is enough.
+  text.append("Until you add them, these sources show \"not checked (no key)\". Run ", command,
+    " in Terminal, then reload this page. README → \"Free API keys\" says where to get each one.");
+  banner.append(title, text);
   banner.hidden = false;
 }
 
@@ -659,6 +702,7 @@ async function poll() {
     let cacheNote = "";
     if ($("nocache").checked) {             // one-off choice: the next run uses the cache again
       $("nocache").checked = false;
+      renderOptionsState();
       cacheNote = " “Ignore cache” is switched back off for the next run.";
     }
     if (data.stopped) {
@@ -754,7 +798,28 @@ for (const radio of document.querySelectorAll('input[name="vt"]')) {
     planTimer = setTimeout(refreshPlan, 300);   // fresh rows and cost line follow shortly
   });
 }
+// The Options summary says what is set, so a closed section never hides a choice.
+function renderOptionsState() {
+  const set = [];
+  // No-break spaces: a narrow screen wraps between items, never inside one or before a dot.
+  if ($("incident").value) set.push("incident\u00a0" + $("incident").value);
+  if ($("nocache").checked) set.push("fresh\u00a0lookups");
+  $("options-state").textContent = set.map((item) => "\u00a0· " + item).join("");
+}
+$("incident").addEventListener("change", renderOptionsState);
+$("nocache").addEventListener("change", renderOptionsState);
 $("nocache").addEventListener("change", schedulePlan);
+
+// Theme: Auto follows the system; Light/Dark are remembered in this browser.
+function setTheme(theme) {
+  if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("ioc-enrich-theme", theme); } catch (e) { /* not saved; still applied */ }
+}
+for (const input of document.querySelectorAll('input[name="theme"]')) {
+  input.checked = input.value === (document.documentElement.dataset.theme || "auto");
+  input.addEventListener("change", () => setTheme(input.value));
+}
 $("incident").addEventListener("change", schedulePlan);   // domain age depends on it: re-plan, mark results stale
 $("run").addEventListener("click", startRun);
 $("stop").addEventListener("click", stopRun);

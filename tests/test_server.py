@@ -97,7 +97,7 @@ class ServerTest(ServerHarness):
         self.assertIn("4 VirusTotal lookups", data["cost"])
         self.assertEqual(len(data["rows"]), 6)
         # Numbers the page uses to say what Run will do (OPSEC gate)
-        self.assertEqual((data["iocs"], data["lookups"], data["vt_calls"], data["vt_calls_max"]), (5, 23, 4, 5))
+        self.assertEqual((data["iocs"], data["lookups"], data["vt_calls"], data["vt_calls_max"]), (5, 25, 4, 5))   # +2: InternetDB for 2 public IPs
         taibeinan = next(r for r in data["rows"] if r["value"] == "www[.]taibeinan[.]cc")
         self.assertEqual(taibeinan["kind"], "plan")
         self.assertEqual({s["state"] for s in taibeinan["sources"]}, {"planned"})
@@ -116,7 +116,7 @@ class ServerTest(ServerHarness):
         self.assertIn("Incident date <span", page)                       # says what the date is for
         self.assertRegex(page, r"@media \(pointer: coarse\)[^}]*\.toggle")   # 44px links toggles on touch
         self.assertIn(".hint { display: none; }", page)                  # no keyboard hint on phones
-        self.assertIn('info: { icon: "info", words: "registration data" }', page)
+        self.assertIn('info: { icon: "info", words: "information only" }', page)
 
     def test_page_has_flagged_only_filter(self):
         page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
@@ -126,13 +126,13 @@ class ServerTest(ServerHarness):
     def test_plan_gives_counts_for_both_switch_positions(self):
         # Bug: toggling VirusTotal showed the old Run label until the plan came back
         data = json.loads(self.request("/api/plan", {"text": SAMPLE})[1])
-        self.assertEqual((data["counts"]["on"]["vt_calls"], data["counts"]["on"]["lookups"]), (4, 23))
-        self.assertEqual((data["counts"]["off"]["vt_calls"], data["counts"]["off"]["lookups"]), (0, 19))
+        self.assertEqual((data["counts"]["on"]["vt_calls"], data["counts"]["on"]["lookups"]), (4, 25))
+        self.assertEqual((data["counts"]["off"]["vt_calls"], data["counts"]["off"]["lookups"]), (0, 21))
 
     def test_plan_counts_with_vt_off(self):
         data = json.loads(self.request("/api/plan", {"text": SAMPLE, "no_vt": True})[1])
         self.assertEqual((data["vt_calls"], data["vt_calls_max"]), (0, 0))
-        self.assertEqual(data["lookups"], 19)
+        self.assertEqual(data["lookups"], 21)
 
     def test_page_has_visible_virustotal_switch(self):
         page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
@@ -306,7 +306,7 @@ class LiveRunTest(ServerHarness):
     def test_progress_counts_only_new_requests(self):
         self.wait_done(self.run_job("146.59.71[.]167"))
         progress = self.wait_done(self.run_job("146.59.71[.]167"))["progress"]   # everything cached now
-        self.assertEqual((progress["vt_total"], progress["total"], progress["reused"]), (0, 0, 5))
+        self.assertEqual((progress["vt_total"], progress["total"], progress["reused"]), (0, 0, 6))
 
     def test_page_explains_evidence_tiers(self):
         page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
@@ -342,6 +342,55 @@ class LiveRunTest(ServerHarness):
         self.assertIn('<th scope="col">Details</th>', page)
         self.assertIn("Flagged · strong", page)
         self.assertIn("source.metric", page)                     # chip shows its number, e.g. "VT 2/92"
+
+    def test_page_keys_banner_points_to_keys_command(self):
+        page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
+        self.assertIn('"Missing API keys: "', page)
+        self.assertIn('"ioc-enrich keys"', page)                       # the command, in its own <code>
+        self.assertIn("in Terminal, then reload this page", page)
+        self.assertNotIn("restart ioc-enrich serve", page)             # keys are re-read on every request
+
+    def test_page_options_are_collapsed_but_never_hidden_when_set(self):
+        page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
+        start = page.index('<details class="options"')
+        block = page[start:page.index("</details>", start)]
+        self.assertIn('id="incident"', block)                          # both rare options live inside
+        self.assertIn('id="nocache"', block)
+        self.assertIn('<summary>Options<span id="options-state"></span></summary>', block)
+        self.assertIn('"incident\\u00a0" +', page)                            # the summary shows what is set
+        self.assertIn('"fresh\\u00a0lookups"', page)
+        # every change, including the end-of-run reset of Ignore cache, updates the summary
+        self.assertIn('$("nocache").checked = false;\n      renderOptionsState();', page)
+        self.assertIn('$("incident").addEventListener("change", renderOptionsState)', page)
+        self.assertIn('$("nocache").addEventListener("change", renderOptionsState)', page)
+
+    def test_page_names_its_author(self):
+        page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
+        self.assertIn('<footer class="credit">by Vlad Guliakin', page)
+        self.assertIn("by Vlad Guliakin", page)
+        # Buttons and inputs use the page font, not the browser default (Arial)
+        self.assertIn("button, input, select { font: inherit; }", page)
+
+    def test_page_explains_info_only_rows(self):
+        page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
+        self.assertIn('if (row.kind === "info") return "Info only · threat-intel sources not checked";', page)
+        self.assertIn("info: 4.5", page)                                # sorts after answered rows
+        self.assertIn("Info only: RDAP (domain age), Shodan InternetDB (IDB: open ports, known vulns)", page)
+
+    def test_page_has_theme_switch(self):
+        page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
+        for value in ("auto", "light", "dark"):
+            self.assertIn(f'<input type="radio" name="theme" value="{value}"', page)
+        # Dark tokens apply for an explicit choice, or for Auto when the system is dark
+        self.assertIn(':root[data-theme="dark"] {', page)
+        self.assertIn(':root:not([data-theme="light"]) {', page)
+        # The saved choice is applied in <head>, before the page draws (no flash of the wrong theme)
+        head = page[:page.index("</head>")]
+        self.assertIn('localStorage.getItem("ioc-enrich-theme")', head)
+        # Storage can be blocked (private window): every access is guarded
+        storage_lines = [line for line in page.splitlines() if "localStorage." in line]
+        self.assertEqual(len(storage_lines), 2)                         # one read, one write
+        self.assertTrue(all("try {" in line and "catch" in line for line in storage_lines))
 
     def test_page_amber_means_virustotal(self):
         page = self.request(f"/?t={TOKEN}", token=None)[1].decode()

@@ -84,6 +84,11 @@ class FlaggedByTest(unittest.TestCase):
     def test_none_and_not_checked(self):
         self.assertEqual(flagged_by([vt(0), R("OTX", "not_listed", {"pulses": 0})]), "flagged by: none")
         self.assertEqual(flagged_by([R("VT", "not_checked", reason="quota")]), "not checked")
+        # Info-only answers (RDAP, InternetDB) cannot flag, so they never make "flagged by: none"
+        idb = R("InternetDB", fields={"ports": [80], "vulns": [], "tags": [], "hostnames": []})
+        self.assertEqual(flagged_by([idb, R("VT", "not_checked", reason="no key")]), "not checked")
+        self.assertEqual(flagged_by([R("RDAP", fields={"created": "2026-05-16"})]), "not checked")
+        self.assertEqual(flagged_by([idb, vt(0)]), "flagged by: none")
 
 
 class CheckedOnTest(unittest.TestCase):
@@ -167,6 +172,9 @@ class EvidenceTierTest(unittest.TestCase):
         self.assertEqual(result_kind([otx, abuse]), "weak")                       # OTX + AbuseIPDB: still weak
         self.assertEqual(result_kind([R("ThreatFox", fields={"families": ["X"]}, flagged=True)]), "flag")
         self.assertEqual(result_kind([vt(0)]), "clean")
+        idb = R("InternetDB", fields={"ports": [80], "vulns": [], "tags": [], "hostnames": []})
+        self.assertEqual(result_kind([idb, R("VT", "not_checked", reason="no key")]), "info")   # only info answered
+        self.assertEqual(result_kind([idb, vt(0)]), "clean")
 
     def test_chip_strength(self):
         from ioc_enrich.format import source_states
@@ -228,6 +236,44 @@ class WebWordingTest(unittest.TestCase):
         results = [R("VT", "not_checked", reason="--no-vt")]
         self.assertEqual(source_states(item, results)[0]["detail"], "not checked (VirusTotal switched off)")
         self.assertEqual(row_details(ioc, results, None), [])   # the headline already says "VT not asked (…)"
+
+
+class InternetDbTextTest(unittest.TestCase):
+    IP = IOC("ip", "146.59.71.167")
+
+    def idb(self, **fields):
+        base = {"ports": [], "vulns": [], "tags": [], "hostnames": []}
+        return R("InternetDB", fields={**base, **fields})
+
+    def test_enrichment_part(self):
+        r = self.idb(ports=[22, 80, 443], vulns=["CVE-2017-15906"], tags=["vpn"])
+        self.assertEqual(enrichment(self.IP, [r], None),
+                         "InternetDB: ports 22 80 443, 1 vuln (CVE-2017-15906), tag vpn")
+
+    def test_long_lists_are_shortened(self):
+        r = self.idb(ports=list(range(1, 13)), vulns=[f"CVE-2020-{n}" for n in range(5)], tags=["cdn", "cloud"])
+        self.assertEqual(enrichment(self.IP, [r], None),
+                         "InternetDB: ports 1 2 3 4 5 6 7 8 9 10 +2, "
+                         "5 vulns (CVE-2020-0, CVE-2020-1, CVE-2020-2, +2), tags cdn cloud")
+
+    def test_no_open_ports_and_not_listed(self):
+        self.assertEqual(enrichment(self.IP, [self.idb()], None), "InternetDB: no open ports seen")
+        self.assertEqual(enrichment(self.IP, [R("InternetDB", "not_listed")], None), "InternetDB: no data")
+
+    def test_comes_after_the_threat_intel_sources(self):
+        abuse = R("AbuseIPDB", fields={"score": 35, "reports": 12}, flagged=True)
+        text = enrichment(self.IP, [self.idb(ports=[80]), abuse], None)
+        self.assertEqual(text, "AbuseIPDB: 35% (12 reports); InternetDB: ports 80")
+
+    def test_web_chip_and_details(self):
+        from ioc_enrich.format import row_details, source_states
+        from ioc_enrich.lookup_plan import Lookup
+        item = PlannedIOC(self.IP, lookups=[Lookup(self.IP, "InternetDB", "InternetDB", self.IP)])
+        r = self.idb(ports=[22, 443], vulns=["CVE-2017-15906"], tags=["vpn"])
+        [chip] = source_states(item, [r])
+        self.assertEqual((chip["short"], chip["name"], chip["state"]), ("IDB", "Shodan InternetDB", "info"))
+        self.assertEqual(chip["detail"], "ports 22 443, 1 vuln (CVE-2017-15906), tag vpn")
+        self.assertIn("open ports 22 443 · 1 vuln (CVE-2017-15906) · tag vpn", row_details(self.IP, [r], None))
 
 
 if __name__ == "__main__":

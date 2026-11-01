@@ -41,6 +41,7 @@ def sample_routes():
         ("GET", "https://otx.alienvault.com/api/v1/indicators/"): fixture("otx_general.json"),
         ("GET", "https://api.abuseipdb.com/api/v2/check?"): fixture("abuseipdb_check.json"),
         ("GET", "https://rdap.org/domain/"): fixture("rdap_domain.json"),
+        ("GET", "https://internetdb.shodan.io/"): fixture("internetdb_host.json"),
     }
 
 

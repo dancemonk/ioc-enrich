@@ -9,8 +9,8 @@ A small tool for the enrichment step of a SOC investigation. Paste IOCs from any
 ```text
 $ echo "www.taibeinan[.]cc 146.59.71[.]167 172.64.155[.]76 172.16.8[.]49" | ioc-enrich --dry-run
 domain www[.]taibeinan[.]cc              would ask: ThreatFox, VT, URLhaus, OTX, RDAP
-ip     146[.]59[.]71[.]167               would ask: ThreatFox, VT, URLhaus, OTX, AbuseIPDB
-ip     172[.]64[.]155[.]76               would ask: ThreatFox, URLhaus, OTX, AbuseIPDB  [shared CDN (Cloudflare) - do not block; VT skipped]
+ip     146[.]59[.]71[.]167               would ask: ThreatFox, VT, URLhaus, OTX, AbuseIPDB, InternetDB
+ip     172[.]64[.]155[.]76               would ask: ThreatFox, URLhaus, OTX, AbuseIPDB, InternetDB  [shared CDN (Cloudflare) - do not block; VT skipped]
 ip     172[.]16[.]8[.]49                 skipped (private)
 
 Cost: 3 IOCs → 2 VirusTotal lookups, about 30 s
@@ -35,11 +35,14 @@ Cost: 3 IOCs → 2 VirusTotal lookups, about 30 s
    | AlienVault OTX | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | free |
    | AbuseIPDB |  | ✓ |  |  |  |  | free |
    | RDAP (rdap.org) | creation date + registrar | | | | | | none |
+   | Shodan InternetDB | | open ports, known vulns, tags | | | | | none |
+
+   RDAP and Shodan InternetDB are **info-only**: they describe an IOC but never flag it.
 
 4. **Writes:**
    - a CSV (see [Output](#output))
    - one summary line per IOC on screen
-   - manual-check links for every IOC (VirusTotal, tria.ge, ThreatFox, URLhaus, MalwareBazaar, OTX, AbuseIPDB), so you can verify anything by hand, especially what the tool could not check
+   - manual-check links for every IOC (VirusTotal, tria.ge, ThreatFox, URLhaus, MalwareBazaar, OTX, AbuseIPDB, Shodan), so you can verify anything by hand, especially what the tool could not check
 
 ## Safety rules
 
@@ -60,7 +63,7 @@ python3 -m venv .venv
 
 ### Free API keys
 
-You need a free account for each service. The tool still works with only some keys: sources without a key are reported as `not checked (no key)`.
+You need a free account for each service. The tool still works with only some keys, or none: sources without a key are reported as `not checked (no key)`. With no keys at all you still get extraction, filtering, `--dry-run`, domain age (RDAP), open ports and known vulns for IPs (Shodan InternetDB) and the manual-check links. One abuse.ch key adds ThreatFox, URLhaus and MalwareBazaar; adding VirusTotal covers the main sources.
 
 | Variable | Where to get it |
 |---|---|
@@ -69,7 +72,15 @@ You need a free account for each service. The tool still works with only some ke
 | `OTX_API_KEY` | Create an account at https://otx.alienvault.com/, then go to Settings → API key |
 | `ABUSEIPDB_API_KEY` | Create an account at https://www.abuseipdb.com/, then go to Account → API |
 
-Put the keys in environment variables, or in `~/.config/ioc-enrich/keys.env`. That file is outside the repo, so it can never be committed:
+The easiest way to save them:
+
+```bash
+ioc-enrich keys
+```
+
+It asks for each key in turn (paste it and press Enter; the key is not shown, and Enter alone skips it). It saves them to `~/.config/ioc-enrich/keys.env`, a file only you can read, outside the repo so it can never be committed. Run it again to add or replace a key. A running web page picks up new keys when you reload it.
+
+You can also set environment variables (they win over the file), or write the file yourself:
 
 ```bash
 mkdir -p ~/.config/ioc-enrich
@@ -84,7 +95,7 @@ chmod 600 ~/.config/ioc-enrich/keys.env
 
 ### Terms of use
 
-The free VirusTotal, AbuseIPDB and abuse.ch keys are for **personal, non-commercial use**. At work, use your employer's licensed keys. Don't create multiple accounts to get around limits.
+The free VirusTotal, AbuseIPDB and abuse.ch keys, and Shodan InternetDB, are for **personal, non-commercial use**. At work, use your employer's licensed keys. Don't create multiple accounts to get around limits.
 
 ## Usage
 
@@ -112,6 +123,9 @@ ioc-enrich alert.txt --deep
 # Local web page
 ioc-enrich serve            # prints http://127.0.0.1:8765/?t=<token>
 
+# Save your API keys (asks for each one)
+ioc-enrich keys
+
 # Refresh the bundled TLD / RDAP / CDN lists
 ioc-enrich update-lists
 ```
@@ -120,7 +134,7 @@ Other options: `-o PATH`, `--no-cache`, `--allowlist PATH` (one domain per line;
 
 ### The web page
 
-`ioc-enrich serve` starts a page that only this computer can reach (it listens on 127.0.0.1). Every request needs the random token printed at startup, and requests from other websites are refused (Host/Origin check). Paste IOCs and the plan updates as you type: one chip per source shows what will be asked (or is already cached). The Check button says exactly what it will send, e.g. "Check 5 IOCs · up to 3 VirusTotal lookups", and turns amber whenever VirusTotal is on; the VirusTotal On/Off switch sits right next to it. During a run the button shows progress ("VirusTotal lookup 2 of 3") and a Stop button appears; stopped or unreachable runs keep every answer so far (they are cached). Results show who flagged what per source; "Flagged only" filters them, "links" opens the manual-check links, and "Download CSV" saves the result. Editing the box after a run keeps the results and shows what the next run would do. ⌘/Ctrl+Enter runs.
+`ioc-enrich serve` starts a page that only this computer can reach (it listens on 127.0.0.1). Every request needs the random token printed at startup, and requests from other websites are refused (Host/Origin check). Paste IOCs and the plan updates as you type: one chip per source shows what will be asked (or is already cached). The Check button says exactly what it will send, e.g. "Check 5 IOCs · up to 3 VirusTotal lookups", and turns amber whenever VirusTotal is on; the VirusTotal On/Off switch sits right next to it. During a run the button shows progress ("VirusTotal lookup 2 of 3") and a Stop button appears; stopped or unreachable runs keep every answer so far (they are cached). Results show who flagged what per source; "Flagged only" filters them, "links" opens the manual-check links, and "Download CSV" saves the result. Editing the box after a run keeps the results and shows what the next run would do. ⌘/Ctrl+Enter runs. The Auto / Light / Dark switch at the top right sets the theme (Auto follows your system) and is remembered in that browser.
 
 ## Output
 
@@ -158,6 +172,7 @@ The tool never says "malicious" or "clean". The decision is the analyst's. The s
 - **ThreatFox, URLhaus, MalwareBazaar:** the IOC is listed
 - **OTX:** at least 1 pulse
 - **AbuseIPDB:** at least 1 report
+- **RDAP, Shodan InternetDB:** never (info-only). If only they answered, the line says `not checked`, not `flagged by: none`.
 
 On the web page a hit is also marked by **strength of evidence**: *strong* when VirusTotal, ThreatFox, URLhaus or MalwareBazaar flagged it, *weak signal* when only OTX pulses and/or AbuseIPDB reports did (both are common on shared or popular infrastructure). Finished results sort strongest first. This describes the sources, not the IOC: the decision stays with the analyst.
 
@@ -178,7 +193,7 @@ The free key allows 4 requests/minute and 500/day.
 - **Registered-domain guess:** last two labels, plus a small built-in list of two-part suffixes (`co.uk`, `com.au`, …). It is not the full Public Suffix List.
 - **Filenames vs domains:** TLDs that look like file extensions (`zip mov py sh md pl rs ps so cc`) count only if the token was defanged, sits inside a URL, or starts with `www.`. Anything else is listed as `ignored (looks like filename)`. This means a bare Polish domain such as `example.pl` is ignored unless you defang it.
 - **ThreatFox** does not search SHA1, and IP lookups may miss entries stored as `ip:port`.
-- **Free tiers:** VT allows 4/min and 500/day; AbuseIPDB allows 1,000 checks/day; abuse.ch and OTX are "fair use".
+- **Free tiers:** VT allows 4/min and 500/day; AbuseIPDB allows 1,000 checks/day; abuse.ch and OTX are "fair use". Shodan InternetDB publishes no limit (the tool asks at most once per second) and is updated weekly, so its ports can be up to a week old.
 - **Manual-check link formats** follow each site's public search pages. If a site changes its URLs, a link may break.
 
 ## Development

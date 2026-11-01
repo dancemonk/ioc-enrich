@@ -43,4 +43,5 @@ def manual_links(ioc: IOC) -> list[tuple[str, str]]:
 
     if ioc.type == "ip":
         links.append(("AbuseIPDB", f"https://www.abuseipdb.com/check/{v}"))
+        links.append(("Shodan", f"https://www.shodan.io/host/{v}"))
     return links

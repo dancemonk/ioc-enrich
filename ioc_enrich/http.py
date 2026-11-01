@@ -46,6 +46,7 @@ _ALLOWED_GET = [
     "https://otx.alienvault.com/api/v1/indicators/",
     "https://api.abuseipdb.com/api/v2/check?",
     "https://rdap.org/domain/",
+    "https://internetdb.shodan.io/",
     # Public lists for update-lists:
     "https://data.iana.org/TLD/tlds-alpha-by-domain.txt",
     "https://data.iana.org/rdap/dns.json",

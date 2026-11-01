@@ -21,6 +21,7 @@ class LinksTest(unittest.TestCase):
         self.assertEqual(links["VirusTotal"], "https://www.virustotal.com/gui/ip-address/146.59.71.167")
         self.assertEqual(links["AbuseIPDB"], "https://www.abuseipdb.com/check/146.59.71.167")
         self.assertEqual(links["OTX"], "https://otx.alienvault.com/indicator/ip/146.59.71.167")
+        self.assertEqual(links["Shodan"], "https://www.shodan.io/host/146.59.71.167")
 
     def test_url(self):
         links = dict(manual_links(IOC("url", "http://x.com/a?b=1")))
@@ -28,6 +29,7 @@ class LinksTest(unittest.TestCase):
         self.assertEqual(links["tria.ge"], "https://tria.ge/s?q=url:http%3A%2F%2Fx.com%2Fa%3Fb%3D1")
         self.assertEqual(links["URLhaus"], "https://urlhaus.abuse.ch/browse.php?search=http%3A%2F%2Fx.com%2Fa%3Fb%3D1")
         self.assertNotIn("AbuseIPDB", links)
+        self.assertNotIn("Shodan", links)
 
     def test_hash(self):
         links = dict(manual_links(IOC("sha256", SHA)))
