@@ -5,6 +5,8 @@ How it works, token by token:
   2. Refang the token and remember whether it was defanged.
   3. Strip wrapping punctuation such as "(", ")", ".", ",".
   4. Try, in order: URL, hash, IPv4, IPv6, domain.
+  5. If none fit, look inside: "label=value" or "md5:value", "host/path"
+     without a scheme, "host:port", and the domain of an email address.
 """
 
 import ipaddress
@@ -19,13 +21,17 @@ from ioc_enrich.models import IOC
 # more likely a file than a Paraguayan domain, so these need extra evidence.
 FILENAME_LIKE_TLDS = {"zip", "mov", "py", "sh", "md", "pl", "rs", "ps", "so", "cc"}
 
-_SPLIT = re.compile(r"[\s,;|\"'<>`]+")
+# "](" splits a Markdown link: [evil.com](http://evil.com/x)
+_SPLIT = re.compile(r"[\s,;|\"'<>`]+|\]\(")
 _LEADING = "([{"
 _TRAILING = ".,;:)]}!?"
 _URL = re.compile(r"^https?://", re.IGNORECASE)
 _HEX = re.compile(r"^[0-9a-fA-F]+$")
 _HASH_TYPES = {32: "md5", 40: "sha1", 64: "sha256"}
 _DOMAIN = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$")
+_LABELLED = re.compile(r"^[a-z][\w.-]{0,30}[=:](.+)$", re.IGNORECASE)   # src_ip=..., md5:...
+_HOST_PORT = re.compile(r"^([^:/]+):\d{1,5}$")
+_ARPA = "reverse DNS or local name (.arpa)"
 
 
 @dataclass
@@ -65,6 +71,11 @@ def _as_domain(text: str, tlds: set[str]) -> str | None:
     return candidate
 
 
+def _is_arpa(host: str) -> bool:
+    """in-addr.arpa and home.arpa names describe internal hosts: never send them out."""
+    return host.lower().rstrip(".").endswith(".arpa")
+
+
 def _normalize_url(url: str) -> tuple[str, str]:
     """Lowercase scheme and host; return (url, host)."""
     parts = urlsplit(url)
@@ -82,48 +93,78 @@ def extract(text: str, tlds: set[str]) -> ExtractResult:
             seen.add(ioc)
             result.iocs.append(ioc)
 
-    for raw in _SPLIT.split(text):
-        if not raw:
-            continue
-        refanged = refang(raw)
-        was_defanged = refanged != raw
-        token = _strip_wrapping(refanged)
-        if not token:
-            continue
-
+    def take(token: str, was_defanged: bool) -> bool:
+        """Add the IOC(s) in one token. False when the token holds none."""
         if _URL.match(token):
             try:
                 url, host = _normalize_url(token)
             except ValueError:          # e.g. a broken port number
-                continue
+                return True
             ip = _as_ipv4(host)
             if ip:
                 add(IOC("url", url))
                 add(IOC("ip", ip))
+            elif _is_arpa(host):
+                result.ignored.append((token, _ARPA))
             elif _as_domain(host, tlds):
                 add(IOC("url", url))
                 add(IOC("domain", host))
-            continue
+            return True
 
         if _HEX.match(token) and len(token) in _HASH_TYPES:
             add(IOC(_HASH_TYPES[len(token)], token.lower()))
-            continue
+            return True
 
         ip = _as_ipv4(token)
         if ip:
             add(IOC("ip", ip))
-            continue
+            return True
 
         if ":" in token and _is_ipv6(token):
             result.ignored.append((token, "IPv6 not supported yet"))
-            continue
+            return True
+
+        if _is_arpa(token) and _DOMAIN.match(token.lower().rstrip(".")):
+            result.ignored.append((token, _ARPA))
+            return True
 
         domain = _as_domain(token, tlds)
         if domain:
             tld = domain.rsplit(".", 1)[1]
             if tld in FILENAME_LIKE_TLDS and not (was_defanged or domain.startswith("www.")):
                 result.ignored.append((token, "looks like filename"))
-                continue
+                return True
             add(IOC("domain", domain))
+            return True
+        return False
+
+    def take_inner(token: str, was_defanged: bool) -> None:
+        """The token itself is no IOC: look for one inside it."""
+        host_port = _HOST_PORT.match(token)
+        if host_port and take(host_port.group(1), was_defanged):
+            return
+        labelled = _LABELLED.match(token)
+        if labelled and take(_strip_wrapping(labelled.group(1)), was_defanged):
+            return
+        if "/" in token:
+            host, rest = token.split("/", 1)
+            if host and not rest.isdigit():          # "1.2.3.0/24" is a network, not a host
+                ip = _as_ipv4(host)
+                if ip:
+                    add(IOC("ip", ip))
+                elif _as_domain(host, tlds) or _is_arpa(host):
+                    take(host, was_defanged)
+            return
+        if token.count("@") == 1:
+            take(token.split("@")[1], was_defanged)
+
+    for raw in _SPLIT.split(text):
+        if not raw:
+            continue
+        refanged = refang(raw)
+        was_defanged = refanged != raw
+        token = _strip_wrapping(refanged)
+        if token and not take(token, was_defanged):
+            take_inner(token, was_defanged)
 
     return result

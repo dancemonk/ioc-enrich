@@ -63,6 +63,17 @@ class SkipAndCdnTest(unittest.TestCase):
             self.assertEqual(load_allowlist(path), {"independent.ie", "microsoft.com"})
             self.assertEqual(load_allowlist(Path(tmp) / "missing.txt"), set())
 
+    def test_load_allowlist_tolerates_common_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "allowlist.txt"
+            path.write_text("\ufeffexample.com\ngood.org  # vendor\n*.corp.com\n   # indented note\n.lan.net\n",
+                            encoding="utf-8")
+            self.assertEqual(load_allowlist(path), {"example.com", "good.org", "corp.com", "lan.net"})
+
+    def test_multicast_and_broadcast_are_skipped(self):
+        iocs = [IOC("ip", "239.255.255.250"), IOC("ip", "224.0.0.251"), IOC("ip", "255.255.255.255")]
+        self.assertEqual([i.skip for i in make_plan(iocs).items], ["private"] * 3)
+
 
 class OutcomeTest(unittest.TestCase):
     def test_sources_by_type_and_rdap_applicability(self):

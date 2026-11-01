@@ -1,9 +1,11 @@
 import ipaddress
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from threading import Event
 from unittest import mock
 
 from ioc_enrich import engine
@@ -210,6 +212,45 @@ class EngineTest(unittest.TestCase):
         tf = self.by_source(results, "www.taibeinan.cc", "ThreatFox")[0]
         self.assertEqual((tf.status, tf.reason), ("not_checked", "no key"))
         self.assertEqual(self.by_source(results, "www.taibeinan.cc", "OTX")[0].status, "ok")
+
+    def test_repeated_429_gives_up_on_that_source(self):
+        # OTX at its daily cap answers 429 without Retry-After: don't wait 3 minutes per IOC.
+        routes = sample_routes()
+        routes[("GET", "https://otx.alienvault.com/api/v1/indicators/")] = RateLimited(None)
+        with mock.patch.object(engine, "OTHER_SOURCE_WORKERS", 1):
+            results = self.run_engine(FakeHttp(routes))
+        self.assertEqual(self.time.sleeps.count(60), 2)
+        for value in ["www.grinswakebthu.info", "www.taibeinan.cc", "146.59.71.167"]:
+            otx = self.by_source(results, value, "OTX")[0]
+            self.assertEqual((otx.status, otx.reason), ("not_checked", "rate limited"))
+        self.assertEqual(self.by_source(results, "146.59.71.167", "AbuseIPDB")[0].status, "ok")
+
+    def test_cache_write_error_keeps_the_answer(self):
+        real_put = self.cache.put
+
+        def put(name, ioc, result):
+            if name in ("OTX", "VT"):
+                raise sqlite3.OperationalError("database is locked")
+            real_put(name, ioc, result)
+
+        with mock.patch.object(self.cache, "put", side_effect=put), \
+                mock.patch.object(self.cache, "add_vt_call", side_effect=sqlite3.OperationalError("locked")):
+            results = self.run_engine(FakeHttp(sample_routes()))
+        self.assertEqual(self.by_source(results, "www.taibeinan.cc", "OTX")[0].status, "ok")
+        self.assertEqual(self.by_source(results, "www.taibeinan.cc", "VT")[0].status, "ok")
+
+    def test_error_in_callback_stops_the_workers(self):
+        cancel = Event()
+
+        def on_result(ioc, result):
+            if result.source == "OTX":
+                raise RuntimeError("display failed")
+
+        with self.assertRaises(RuntimeError):
+            engine.run(self.planned, ALL_KEYS, FakeHttp(sample_routes()), self.cache, RunOptions(),
+                       on_result=on_result, today=lambda: TODAY, sleep=self.time.sleep,
+                       clock=self.time.clock, cancel=cancel)
+        self.assertTrue(cancel.is_set())
 
     def test_source_errors_do_not_stop_run(self):
         # Review Focus 4

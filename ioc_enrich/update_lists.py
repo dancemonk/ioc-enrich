@@ -6,6 +6,7 @@ lists for exactly this use). It never contacts an IOC.
 
 import ipaddress
 import json
+import os
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -30,9 +31,27 @@ def _ipv4_only(cidrs: list[str]) -> list[str]:
     return kept
 
 
-def _write_text_list(path: Path, url: str, today: date, items: list[str]) -> None:
-    header = f"# fetched {today.isoformat()} from {url}\n"
-    path.write_text(header + "\n".join(sorted(items)) + "\n", encoding="utf-8")
+def _text_list(url: str, today: date, items: list[str]) -> str:
+    return f"# fetched {today.isoformat()} from {url}\n" + "\n".join(sorted(items)) + "\n"
+
+
+def _replace_all(files: dict[Path, str]) -> None:
+    """Write every file to a temp name first, then swap them in.
+
+    os.replace is atomic, so a crash leaves each list either old or new, never cut short.
+    """
+    temps = {}
+    try:
+        for path, text in files.items():
+            temp = path.with_name(path.name + ".tmp")
+            temp.write_text(text, encoding="utf-8")
+            temps[path] = temp
+        for path, temp in temps.items():
+            os.replace(temp, path)
+    finally:
+        for temp in temps.values():
+            if temp.exists():
+                temp.unlink()
 
 
 _TLD_PATTERN = re.compile(r"^[a-z0-9-]+$")
@@ -46,7 +65,8 @@ def _fetch(http, url: str):
     return response
 
 
-def update_lists(http, data_dir: Path, today: date, min_tlds: int = 1000) -> list[str]:
+def update_lists(http, data_dir: Path, today: date, min_tlds: int = 1000,
+                 min_rdap_tlds: int = 500) -> list[str]:
     """Download the lists, check they look sane, then write them into data_dir.
 
     Nothing is written unless every download succeeded and passed the checks,
@@ -59,26 +79,30 @@ def update_lists(http, data_dir: Path, today: date, min_tlds: int = 1000) -> lis
         raise ValueError(f"{TLD_URL}: unexpected content ({len(tlds)} lines)")
 
     rdap_tlds = rdap_tlds_from_bootstrap(_fetch(http, RDAP_URL).json())
-    if not rdap_tlds:
-        raise ValueError(f"{RDAP_URL}: no TLDs found")
+    if len(rdap_tlds) < min_rdap_tlds:
+        raise ValueError(f"{RDAP_URL}: only {len(rdap_tlds)} TLDs found")
 
     cloudflare = _ipv4_only(_fetch(http, CLOUDFLARE_URL).body.decode("utf-8").split())
     fastly = _ipv4_only(_fetch(http, FASTLY_URL).json().get("addresses", []))
     aws = _fetch(http, CLOUDFRONT_URL).json().get("prefixes", [])
     cloudfront = _ipv4_only([p["ip_prefix"] for p in aws if p.get("service") == "CLOUDFRONT"])
-    if not cloudflare:
-        raise ValueError(f"{CLOUDFLARE_URL}: no IPv4 ranges found")
+    # An empty list would quietly send that CDN's IPs to VirusTotal.
+    for url, ranges in ((CLOUDFLARE_URL, cloudflare), (FASTLY_URL, fastly), (CLOUDFRONT_URL, cloudfront)):
+        if not ranges:
+            raise ValueError(f"{url}: no IPv4 ranges found")
 
     # All downloads are good: write the files.
     data_dir.mkdir(parents=True, exist_ok=True)
-    _write_text_list(data_dir / "tlds.txt", TLD_URL, today, tlds)
-    _write_text_list(data_dir / "rdap_tlds.txt", RDAP_URL, today, list(rdap_tlds))
     cdn = {
         "fetched": today.isoformat(),
         "sources": {"Cloudflare": CLOUDFLARE_URL, "Fastly": FASTLY_URL, "CloudFront": CLOUDFRONT_URL},
         "providers": {"Cloudflare": cloudflare, "Fastly": fastly, "CloudFront": cloudfront},
     }
-    (data_dir / "cdn_ranges.json").write_text(json.dumps(cdn, indent=1) + "\n", encoding="utf-8")
+    _replace_all({
+        data_dir / "tlds.txt": _text_list(TLD_URL, today, tlds),
+        data_dir / "rdap_tlds.txt": _text_list(RDAP_URL, today, list(rdap_tlds)),
+        data_dir / "cdn_ranges.json": json.dumps(cdn, indent=1) + "\n",
+    })
 
     return [
         f"tlds.txt: {len(tlds)} TLDs",

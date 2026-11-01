@@ -33,6 +33,20 @@ class ThreatFoxTest(unittest.TestCase):
         http = FakeHttp({("POST", TF): fixture("tf_none.json")})
         self.assertEqual(threatfox.lookup(IOC("ip", "1.2.3.4"), "K", http, TODAY).status, "not_listed")
 
+    def test_ip_matches_ip_port_entries_only(self):
+        # ThreatFox stores most IPs as "ip:port", so an exact search for the bare IP misses them.
+        entries = [{"ioc": "45.61.136.1:443", "malware_printable": "Cobalt Strike"},
+                   {"ioc": "145.61.136.10:80", "malware_printable": "Look-alike"}]
+        http = FakeHttp({("POST", TF): json_response({"query_status": "ok", "data": entries})})
+        r = threatfox.lookup(IOC("ip", "45.61.136.1"), "K", http, TODAY)
+        self.assertEqual((r.status, r.fields["families"], r.flagged), ("ok", ["Cobalt Strike"], True))
+        self.assertEqual(http.calls[0][2], {"query": "search_ioc", "search_term": "45.61.136.1"})
+
+    def test_ip_with_only_look_alikes_is_not_listed(self):
+        entries = [{"ioc": "145.61.136.10:80", "malware_printable": "Look-alike"}]
+        http = FakeHttp({("POST", TF): json_response({"query_status": "ok", "data": entries})})
+        self.assertEqual(threatfox.lookup(IOC("ip", "45.61.136.1"), "K", http, TODAY).status, "not_listed")
+
     def test_hash_query(self):
         http = FakeHttp({("POST", TF): fixture("tf_none.json")})
         threatfox.lookup(IOC("sha256", SHA), "K", http, TODAY)

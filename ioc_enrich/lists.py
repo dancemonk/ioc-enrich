@@ -10,13 +10,11 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent / "data"
 
 # Public suffixes made of two labels. For "a.bbc.co.uk" the registered
-# domain is "bbc.co.uk", not "co.uk". This is a small built-in list,
-# not the full Public Suffix List (stdlib-only rule; see README limitations).
-TWO_PART_SUFFIXES = {
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au",
-    "co.nz", "co.jp", "co.za", "co.in", "com.br", "com.cn", "com.mx",
-    "com.tr", "com.sg", "com.hk",
-}
+# domain is "bbc.co.uk", not "co.uk". Many country TLDs sell names one level
+# down (co.il, net.cn, com.ru, ne.jp, gob.mx), so under any two-letter TLD
+# these second labels count as part of the suffix. A built-in rule, not the
+# full Public Suffix List (stdlib-only rule; see docs/usage.md limitations).
+COUNTRY_SECOND_LEVELS = {"co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nic"}
 
 
 def _read_lines(path: Path) -> list[str]:
@@ -64,6 +62,6 @@ def registered_domain(host: str) -> str:
     "www.taibeinan.cc" -> "taibeinan.cc"; "a.b.bbc.co.uk" -> "bbc.co.uk".
     """
     labels = host.lower().rstrip(".").split(".")
-    if len(labels) >= 3 and ".".join(labels[-2:]) in TWO_PART_SUFFIXES:
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in COUNTRY_SECOND_LEVELS:
         return ".".join(labels[-3:])
     return ".".join(labels[-2:])

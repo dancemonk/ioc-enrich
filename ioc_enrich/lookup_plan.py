@@ -176,8 +176,15 @@ def load_allowlist(path: Path) -> set[str]:
     """Known-good domains, one per line. A missing file means an empty list."""
     if not path.exists():
         return set()
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return {line.strip().lower() for line in lines if line.strip() and not line.startswith("#")}
+    domains = set()
+    # utf-8-sig drops the BOM some Windows editors add at the start of the file.
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        entry = line.split("#", 1)[0].strip().lower()
+        # "*.corp.com" and ".corp.com" mean the same as "corp.com": subdomains are covered anyway.
+        entry = entry.removeprefix("*").lstrip(".")
+        if entry:
+            domains.add(entry)
+    return domains
 
 
 def keyed_sources(keys: Keys) -> set[str]:
@@ -193,9 +200,11 @@ def _is_allowlisted(host: str, allowlist: set[str]) -> bool:
 def _is_non_global_ip(text: str) -> bool:
     """True for private/reserved IPv4 addresses; False for anything else."""
     try:
-        return not ipaddress.IPv4Address(text).is_global
+        address = ipaddress.IPv4Address(text)
     except ValueError:
         return False
+    # is_global is True for multicast (224.0.0.0/4), which is never an internet host.
+    return not address.is_global or address.is_multicast
 
 
 def _skip_and_cdn(ioc: IOC, allowlist: set[str], cdn_ranges) -> tuple[str | None, str | None]:

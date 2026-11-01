@@ -20,7 +20,7 @@ ioc-enrich keys                          # save your API keys
 ioc-enrich update-lists                  # refresh the bundled TLD, RDAP and CDN lists
 ```
 
-Other options: `-o PATH`, `--no-cache`, `--allowlist PATH` (one domain per line, subdomains included), `--keys PATH`, `--vt-per-minute N` and `--vt-daily-limit N` for a premium key.
+Other options: `-o PATH`, `--no-cache`, `--allowlist PATH` (one domain per line, subdomains included; `# comments` and `*.corp.com` are fine), `--keys PATH`, `--vt-per-minute N` and `--vt-daily-limit N` for a premium key.
 
 A dry run looks like this:
 
@@ -36,9 +36,9 @@ Cost: 3 IOCs → 2 VirusTotal lookups, about 30 s
 
 ## What happens to your input
 
-Extraction finds domains, IPv4 addresses, URLs and MD5/SHA1/SHA256 hashes in free text, and refangs `hxxp`, `[.]`, `(.)` and `[:]`. A URL gives one `url` row plus one row for its host.
+Extraction finds domains, IPv4 addresses, URLs and MD5/SHA1/SHA256 hashes in free text, and refangs `hxxp`, `[.]`, `(.)` and `[:]`. A URL gives one `url` row plus one row for its host. It also looks inside `label=value` and `md5:value`, `host/path` written without a scheme, `host:port`, Markdown links and email addresses (the domain only). `.arpa` names (reverse DNS, `home.arpa`) describe internal hosts, so they are listed as ignored and never sent.
 
-Before any lookup, duplicates go, private and reserved IPs are skipped, and allowlisted domains are left alone. IPs in a shared CDN range (Cloudflare, Fastly, CloudFront) are marked `shared CDN (…) - do not block` and never go to VirusTotal.
+Before any lookup, duplicates go, private, reserved and multicast IPs are skipped, and allowlisted domains are left alone. IPs in a shared CDN range (Cloudflare, Fastly, CloudFront) are marked `shared CDN (…) - do not block` and never go to VirusTotal.
 
 Each IOC is then asked only of the sources that support its type (table in the README). Every IOC also gets manual-check links (VirusTotal, tria.ge, ThreatFox, URLhaus, MalwareBazaar, OTX, AbuseIPDB, Shodan) so you can verify by hand, especially whatever the tool couldn't check.
 
@@ -115,15 +115,15 @@ The free key allows 4 requests a minute and 500 a day. Calls are spaced 15 s apa
 
 Answers are cached for 7 days in `~/.cache/ioc-enrich/cache.sqlite` and stored the moment they arrive, so after Ctrl-C you rerun the same command and it picks up where it stopped.
 
-On HTTP 429 the tool waits (honouring `Retry-After`) and retries. It also counts its own VT calls per day. Once the daily quota is gone, or after three 429s in a row, it stops asking VT for the rest of the run and lists every IOC that ended up `not checked (quota)`.
+On HTTP 429 the tool waits (honouring `Retry-After`) and retries. It also counts its own VT calls per day. Once the daily quota is gone, or after three 429s in a row, it stops asking VT for the rest of the run and lists every IOC that ended up `not checked (quota)`. Other sources work the same way: three 429s in a row, or a `Retry-After` longer than two minutes, and that source shows `not checked (rate limited)` for the rest of the run.
 
 ## Limitations
 
 - IPv4 only. IPv6 addresses show as `skipped (IPv6 not supported yet)`.
 - Some TLDs have no RDAP server (`.ie .io .co .de .me .ru .cn`). For those the creation date comes from one extra VT call on the registered domain, counted in the cost line, or it's `age n/a`.
-- The registered domain is a guess: the last two labels, plus a short list of two-part suffixes like `co.uk`. It isn't the full Public Suffix List.
+- The registered domain is a guess: the last two labels, or three under a country TLD whose second label is a common one like `co.uk`, `net.cn` or `com.ru`. It isn't the full Public Suffix List.
 - TLDs that look like file extensions (`zip mov py sh md pl rs ps so cc`) only count when the token was defanged, sits in a URL or starts with `www.`. Otherwise it's `ignored (looks like filename)`, so a bare `example.pl` needs defanging.
-- ThreatFox can't search SHA1, and its IP lookups can miss entries stored as `ip:port`.
+- ThreatFox can't search SHA1.
 - Free tiers: AbuseIPDB allows 1,000 checks a day, abuse.ch and OTX are "fair use", and Shodan InternetDB publishes no limit (the tool asks at most once a second). InternetDB updates weekly, so its ports can be a week old.
 - Manual-check links follow each site's public search URLs and break if a site changes them.
 

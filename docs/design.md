@@ -42,7 +42,7 @@ Keys: env vars (`VT_API_KEY`, `ABUSECH_AUTH_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_
 | Source | Lookup (only these) | Auth header | Free limits |
 |---|---|---|---|
 | VirusTotal v3 | `GET /api/v3/domains/{d}`, `/ip_addresses/{ip}`, `/files/{hash}`, `/urls/{base64url-no-padding}` | `x-apikey` | 4/min, 500/day; non-commercial; 429 `QuotaExceededError`, 404 `NotFoundError` |
-| ThreatFox | `POST https://threatfox-api.abuse.ch/api/v1/` JSON `{"query":"search_ioc","search_term":v,"exact_match":true}` or `{"query":"search_hash","hash":h}` (md5/sha256 only, no sha1) | `Auth-Key` | fair use |
+| ThreatFox | `POST https://threatfox-api.abuse.ch/api/v1/` JSON `{"query":"search_ioc","search_term":v,"exact_match":true}` (IPs: wildcard search, keep only `ip` and `ip:port` entries) or `{"query":"search_hash","hash":h}` (md5/sha256 only, no sha1) | `Auth-Key` | fair use |
 | URLhaus | `POST https://urlhaus-api.abuse.ch/v1/url/` (form `url`), `/v1/host/` (`host`), `/v1/payload/` (`md5_hash`/`sha256_hash`) | `Auth-Key` | fair use |
 | MalwareBazaar | `POST https://mb-api.abuse.ch/api/v1/` form `query=get_info&hash=h` | `Auth-Key` | fair use |
 | OTX | `GET https://otx.alienvault.com/api/v1/indicators/{IPv4\|domain\|hostname\|url\|file}/{v}/general` | `X-OTX-API-KEY` | undocumented (~10k/h reported) |

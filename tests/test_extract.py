@@ -66,5 +66,40 @@ class ExtractTest(unittest.TestCase):
             ("ip", "172.16.8.49"), ("ip", "172.64.155.76"), ("domain", "www.independent.ie")])
 
 
+class TicketShapesTest(unittest.TestCase):
+    """Token shapes analysts paste every day."""
+
+    def test_host_with_path_and_no_scheme(self):
+        result = extract("evil[.]com/gate.php 45.9.148[.]12/bins/mips", TLDS)
+        self.assertEqual(pairs(result), [("domain", "evil.com"), ("ip", "45.9.148.12")])
+
+    def test_cidr_and_file_paths_are_not_hosts(self):
+        result = extract("45.9.148.0/24 /usr/bin/curl scripts/run.sh HTTP/1.1", TLDS)
+        self.assertEqual(pairs(result), [])
+
+    def test_labelled_values(self):
+        md5 = "d41d8cd98f00b204e9800998ecf8427e"
+        result = extract(f"md5:{md5} src_ip=8.8.4.4 url=hxxp://evil[.]com/x", TLDS)
+        self.assertEqual(pairs(result), [
+            ("md5", md5), ("ip", "8.8.4.4"), ("url", "http://evil.com/x"), ("domain", "evil.com")])
+
+    def test_email_gives_its_domain(self):
+        self.assertEqual(pairs(extract("From: billing@evil-pay[.]com", TLDS)),
+                         [("domain", "evil-pay.com")])
+
+    def test_markdown_link(self):
+        self.assertEqual(pairs(extract("[evil.com](http://evil.com/x)", TLDS)), [
+            ("domain", "evil.com"), ("url", "http://evil.com/x")])
+
+    def test_domain_with_port(self):
+        self.assertEqual(pairs(extract("evil[.]com:8443", TLDS)), [("domain", "evil.com")])
+
+    def test_arpa_names_are_ignored(self):
+        tlds = TLDS | {"arpa"}
+        result = extract("5.1.168.192.in-addr.arpa http://router.home.arpa/admin", tlds)
+        self.assertEqual(pairs(result), [])
+        self.assertEqual([reason for _, reason in result.ignored], ["reverse DNS or local name (.arpa)"] * 2)
+
+
 if __name__ == "__main__":
     unittest.main()

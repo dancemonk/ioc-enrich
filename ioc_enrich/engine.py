@@ -132,6 +132,14 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
     def not_checked(source: str, reason: str) -> SourceResult:
         return SourceResult(source, "not_checked", today(), reason=reason)
 
+    def store(lookup: Lookup, result: SourceResult) -> None:
+        """Cache an answer. If the cache fails (e.g. "database is locked" while the
+        web page and the CLI share it), keep the answer anyway: it just isn't cached."""
+        try:
+            cache.put(lookup.cache_name, lookup.cache_ioc, result)
+        except Exception:
+            pass
+
     # ---- other sources: thread pool ---------------------------------------
     rdap_limiter = RateLimiter(RDAP_PER_MINUTE, clock=clock, sleep=pause)
     internetdb_limiter = RateLimiter(INTERNETDB_PER_MINUTE, clock=clock, sleep=pause)
@@ -145,7 +153,7 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
         if reason:                               # this source hit its daily limit earlier
             emit(ioc, not_checked(source, reason))
             return
-        for _attempt in range(MAX_429_IN_A_ROW):
+        for attempt in range(1, MAX_429_IN_A_ROW + 1):
             try:
                 if source == "RDAP":
                     rdap_limiter.wait()
@@ -157,9 +165,11 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
                 break
             except RateLimited as limited:
                 wait = limited.retry_after or 60
-                if wait > MAX_WAIT_SECONDS:
-                    # Hours, not seconds: a daily limit. Report it, don't hang.
-                    reason = f"rate limited (retry after {int(wait)} s)"
+                if wait > MAX_WAIT_SECONDS or attempt == MAX_429_IN_A_ROW:
+                    # Hours of Retry-After, or 429 after 429: a daily cap. Stop asking
+                    # this source for the rest of the run instead of waiting per IOC.
+                    reason = (f"rate limited (retry after {int(wait)} s)" if wait > MAX_WAIT_SECONDS
+                              else "rate limited")
                     with lock:
                         given_up[source] = reason
                     result = not_checked(source, reason)
@@ -170,9 +180,7 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
             except Exception as error:          # network error, bad JSON, ...
                 result = not_checked(source, f"error: {type(error).__name__}")
                 break
-        else:
-            result = not_checked(source, "error: rate limited")
-        cache.put(lookup.cache_name, lookup.cache_ioc, result)
+        store(lookup, result)
         emit(ioc, result)
 
     # ---- VirusTotal: one worker, rate limited -----------------------------
@@ -189,7 +197,10 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
                 raise _Stopped()
             try:
                 result = call()
-                cache.add_vt_call()
+                try:
+                    cache.add_vt_call()
+                except Exception:            # a failed counter must not lose the answer
+                    pass
                 return result
             except RateLimited as limited:
                 in_a_row += 1
@@ -233,7 +244,7 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
             return
         except Exception as error:
             result = not_checked(lookup.source, f"error: {type(error).__name__}")
-        cache.put(lookup.cache_name, lookup.cache_ioc, result)
+        store(lookup, result)
         emit(lookup.ioc, result)
         queue_follow_ups(lookup, result)
 
@@ -259,10 +270,11 @@ def run(plan: LookupPlan, keys: Keys, http, cache: Cache, opts: RunOptions,
         while vt_queue and not stop.is_set():
             vt_job(vt_queue.popleft())
         for future in futures:
-            future.result()       # re-raises KeyboardInterrupt from a worker
-    except KeyboardInterrupt:
-        # Ctrl-C: drop queued work, let running lookups finish and reach the
-        # cache (waits end early via `stop`), then hand the interrupt on.
+            future.result()       # re-raises KeyboardInterrupt (or any error) from a worker
+    except BaseException:
+        # Ctrl-C or an error: drop queued work, let running lookups finish and
+        # reach the cache (waits end early via `stop`), then hand the error on.
+        # Without this, queued lookups would keep running after run() gave up.
         stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
         raise

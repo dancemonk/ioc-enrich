@@ -22,6 +22,17 @@ class RegisteredDomainTest(unittest.TestCase):
     def test_two_part_suffix(self):
         self.assertEqual(lists.registered_domain("a.b.bbc.co.uk"), "bbc.co.uk")
 
+    def test_country_second_levels(self):
+        # Asking VT the age of "co.il" would make a fresh domain look decades old.
+        for host, expected in [("x.evil.net.cn", "evil.net.cn"), ("shop.evil.co.il", "evil.co.il"),
+                               ("a.evil.com.ru", "evil.com.ru"), ("www.evil.ne.jp", "evil.ne.jp"),
+                               ("m.evil.gob.mx", "evil.gob.mx")]:
+            self.assertEqual(lists.registered_domain(host), expected, host)
+
+    def test_second_level_rule_only_under_country_tlds(self):
+        self.assertEqual(lists.registered_domain("www.co.example.com"), "example.com")
+        self.assertEqual(lists.registered_domain("a.net.info"), "net.info")
+
 
 class CdnTest(unittest.TestCase):
     def test_cdn_provider(self):
@@ -48,8 +59,10 @@ class UpdateListsTest(unittest.TestCase):
         })
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            summary = update_lists(http, out, date(2026, 10, 31), min_tlds=1)
+            summary = update_lists(http, out, date(2026, 10, 31), min_tlds=1, min_rdap_tlds=1)
             self.assertEqual(len(summary), 3)
+            self.assertEqual(sorted(f.name for f in out.iterdir()),
+                             ["cdn_ranges.json", "rdap_tlds.txt", "tlds.txt"])     # no temp files left
             tlds = (out / "tlds.txt").read_text().splitlines()
             self.assertTrue(tlds[0].startswith("# fetched 2026-10-31 from https://data.iana.org/TLD/"))
             self.assertEqual(lists.load_tlds(out), {"com", "ie", "cc"})
@@ -83,6 +96,36 @@ class UpdateListsValidationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 update_lists(http, Path(tmp), date(2026, 10, 31), min_tlds=1000)
             self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def _routes(self, fastly=None, aws=None, rdap=None):
+        return FakeHttp({
+            ("GET", "https://data.iana.org/TLD/"): text_response("COM\nIE\nCC\n"),
+            ("GET", "https://data.iana.org/rdap/"): json_response(
+                rdap or json.loads((FIXTURES / "rdap_dns.json").read_text())),
+            ("GET", "https://www.cloudflare.com/ips-v4"): text_response("173.245.48.0/20\n"),
+            ("GET", "https://api.fastly.com/"): json_response(fastly or {"addresses": ["23.235.32.0/20"]}),
+            ("GET", "https://ip-ranges.amazonaws.com/"): json_response(
+                aws or {"prefixes": [{"ip_prefix": "13.32.0.0/15", "service": "CLOUDFRONT"}]}),
+        })
+
+    def _assert_rejected(self, http, **limits):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "cdn_ranges.json").write_text("old")
+            with self.assertRaises(ValueError):
+                update_lists(http, out, date(2026, 10, 31), min_tlds=1, **limits)
+            self.assertEqual((out / "cdn_ranges.json").read_text(), "old")
+            self.assertEqual(sorted(f.name for f in out.iterdir()), ["cdn_ranges.json"])
+
+    def test_empty_fastly_rejected(self):
+        self._assert_rejected(self._routes(fastly={"error": "rate limited"}), min_rdap_tlds=1)
+
+    def test_empty_cloudfront_rejected(self):
+        self._assert_rejected(self._routes(aws={"prefixes": [{"ip_prefix": "3.5.140.0/22", "service": "AMAZON"}]}),
+                              min_rdap_tlds=1)
+
+    def test_too_few_rdap_tlds_rejected(self):
+        self._assert_rejected(self._routes(), min_rdap_tlds=500)
 
 
 if __name__ == "__main__":
