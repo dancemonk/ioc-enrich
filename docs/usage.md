@@ -124,6 +124,7 @@ On HTTP 429 the tool waits (honouring `Retry-After`) and retries. It also counts
 - The registered domain is a guess: the last two labels, or three under a country TLD whose second label is a common one like `co.uk`, `net.cn` or `com.ru`. It isn't the full Public Suffix List.
 - TLDs that look like file extensions (`zip mov py sh md pl rs ps so cc`) only count when the token was defanged, sits in a URL or starts with `www.`. Otherwise it's `ignored (looks like filename)`, so a bare `example.pl` needs defanging.
 - ThreatFox can't search SHA1.
+- OTX counts at most 50 pulses per IOC, so a busy indicator shows `OTX: 50+ pulses`.
 - Free tiers: AbuseIPDB allows 1,000 checks a day, abuse.ch and OTX are "fair use", and Shodan InternetDB publishes no limit (the tool asks at most once a second). InternetDB updates weekly, so its ports can be a week old.
 - Manual-check links follow each site's public search URLs and break if a site changes them.
 

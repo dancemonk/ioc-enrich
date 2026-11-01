@@ -12,10 +12,20 @@ PART_ORDER = ["ThreatFox", "VT", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB",
 FLAG_ORDER = ["VT", "ThreatFox", "URLhaus", "MalwareBazaar", "OTX", "AbuseIPDB"]
 # Sources that describe an IOC but can never flag it. Their answers alone are not a "none".
 INFO_SOURCES = {"RDAP", "InternetDB"}
+# OTX's general section lists at most 50 pulses and its count stops there too.
+OTX_PULSE_CAP = 50
 
 
 def _plural(count: int, word: str) -> str:
     return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def _pulse_count(pulses: int) -> str:
+    return f"{pulses}+" if pulses >= OTX_PULSE_CAP else str(pulses)
+
+
+def _pulses(pulses: int) -> str:
+    return f"{_pulse_count(pulses)} pulse{'' if pulses == 1 else 's'}"
 
 
 def _shortened(items: list, limit: int, sep: str) -> str:
@@ -66,7 +76,7 @@ def _found_text(result: SourceResult) -> str:
     if source == "MalwareBazaar":
         return f"MalwareBazaar: {f.get('signature') or 'listed'}"
     if source == "OTX":
-        return f"OTX: {_plural(f.get('pulses', 0), 'pulse')}"
+        return f"OTX: {_pulses(f.get('pulses', 0))}"
     if source == "AbuseIPDB":
         return f"AbuseIPDB: {f.get('score', 0)}% ({_plural(f.get('reports', 0), 'report')})"
     if source == "InternetDB":
@@ -133,7 +143,7 @@ def flagged_by(results: list[SourceResult]) -> str:
         if name == "VT":
             labels.append(_vt_score(result.fields))
         elif name == "OTX":
-            labels.append(f"OTX {_plural(result.fields['pulses'], 'pulse')}")
+            labels.append(f"OTX {_pulses(result.fields['pulses'])}")
         elif name == "AbuseIPDB":
             labels.append(f"AbuseIPDB {_plural(result.fields['reports'], 'report')}")
         else:
@@ -281,7 +291,7 @@ def _chip_metric(answer: SourceResult) -> str:
     if answer.source == "VT":
         return f"{f['malicious'] + f['suspicious']}/{f['total']}"
     if answer.source == "OTX":
-        return str(f.get("pulses", ""))
+        return _pulse_count(f.get("pulses", 0))
     if answer.source == "AbuseIPDB":
         return str(f.get("reports", ""))
     if answer.source == "ThreatFox":

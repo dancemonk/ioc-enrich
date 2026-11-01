@@ -227,6 +227,23 @@ class DistilledRowTest(unittest.TestCase):
                          ["not checked: OTX (error: TimeoutError)"])   # VT's gap is named by the headline, not repeated
 
 
+class OtxPulseCapTest(unittest.TestCase):
+    """OTX's general section lists at most 50 pulses, so 50 means "50 or more"."""
+
+    def test_capped_count_shows_plus(self):
+        from ioc_enrich.format import source_states
+        from ioc_enrich.lookup_plan import Lookup
+        otx = R("OTX", fields={"pulses": 50}, flagged=True)
+        self.assertEqual(enrichment(IOC("md5", "44d88612fea8a8f36de82e1278abb02f"), [otx], None), "OTX: 50+ pulses")
+        self.assertEqual(flagged_by([otx]), "flagged by: OTX 50+ pulses")
+        item = PlannedIOC(DOM, lookups=[Lookup(DOM, "OTX", "OTX", DOM)])
+        [chip] = source_states(item, [otx])
+        self.assertEqual(chip["metric"], "50+")
+
+    def test_count_below_cap_is_exact(self):
+        self.assertEqual(flagged_by([R("OTX", fields={"pulses": 49}, flagged=True)]), "flagged by: OTX 49 pulses")
+
+
 class WebWordingTest(unittest.TestCase):
     def test_no_cli_flags_in_page_texts(self):
         from ioc_enrich.format import row_details, source_states
