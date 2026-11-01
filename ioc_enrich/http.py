@@ -57,7 +57,7 @@ _ALLOWED_GET = [
 
 # VT: /{collection}/{id} with an optional read-only relationship.
 _VT_PATH = re.compile(
-    r"^(domains|ip_addresses|urls|files)/[^/?]+"
+    r"^(domains|ip_addresses|urls|files)/[A-Za-z0-9._:-]+"     # domain, IP, hash or base64url id
     r"(/(resolutions|contacted_domains|contacted_ips))?(\?limit=\d+)?$"
 )
 
@@ -81,9 +81,14 @@ _FORBIDDEN_SEGMENTS = {
 
 def check_allowed(method: str, url: str, body: dict | None = None) -> None:
     """Raise BlockedEndpoint unless this is a known, read-only lookup."""
+    if any(ord(c) <= 32 or c == "\\" for c in url):
+        raise BlockedEndpoint(f"control character, space or backslash in URL: {method} {url!r}")
     segments = urllib.parse.urlsplit(url).path.lower().split("/")
     if _FORBIDDEN_SEGMENTS.intersection(segments):
         raise BlockedEndpoint(f"forbidden endpoint: {method} {url}")
+    # "../" would climb out of the allowed prefix, also when written as %2e%2e.
+    if any(urllib.parse.unquote(seg) in (".", "..") for seg in segments):
+        raise BlockedEndpoint(f"path traversal: {method} {url}")
 
     if method == "GET":
         if url.startswith(VT_API) and _VT_PATH.match(url[len(VT_API):]):
@@ -105,12 +110,19 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
     Any other redirect raises BlockedEndpoint, so a key can never be sent to
     a host we did not choose."""
 
+    MAX_RDAP_HOPS = 3     # rdap.org -> TLD server, plus a move or a trailing-slash fix
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not req.full_url.startswith("https://rdap.org/domain/"):
+        hops = getattr(req, "rdap_hops", 0)
+        if not (hops or req.full_url.startswith("https://rdap.org/domain/")):
             raise BlockedEndpoint(f"redirect refused: {req.full_url} -> {newurl}")
         if not newurl.startswith("https://"):
             raise BlockedEndpoint(f"redirect to non-https refused: {newurl}")
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        if hops >= self.MAX_RDAP_HOPS:
+            raise BlockedEndpoint(f"too many RDAP redirects: {newurl}")
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        new.rdap_hops = hops + 1
+        return new
 
 
 _OPENER = urllib.request.build_opener(_SafeRedirect)

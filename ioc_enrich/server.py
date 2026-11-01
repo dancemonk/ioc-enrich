@@ -122,7 +122,8 @@ def make_server(port: int, token: str, deps, keys: Keys | None = None) -> Thread
             if origin is not None and origin not in {f"http://{h}" for h in hosts}:
                 return False
             given = query_token if query_token is not None else self.headers.get("X-Token", "")
-            return secrets.compare_digest(given or "", token)
+            # Compare bytes: compare_digest raises on non-ASCII str, which would drop the connection.
+            return secrets.compare_digest((given or "").encode("utf-8", "replace"), token.encode())
 
         def _body(self) -> dict | None:
             """The request's JSON object, or None after sending a 4xx answer."""

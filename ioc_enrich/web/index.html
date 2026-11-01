@@ -773,7 +773,8 @@ async function downloadCsv() {
   link.href = URL.createObjectURL(await reply.blob());
   link.download = match ? match[1] : "ioc-enrich.csv";
   link.click();
-  URL.revokeObjectURL(link.href);
+  const blobUrl = link.href;
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);   // let the download start first
 }
 
 $("text").addEventListener("input", schedulePlan);

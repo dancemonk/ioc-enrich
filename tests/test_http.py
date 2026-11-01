@@ -33,6 +33,24 @@ class CheckAllowedTest(unittest.TestCase):
                 with self.assertRaises(BlockedEndpoint):
                     check_allowed(method, url, body)
 
+    def test_path_tricks_blocked(self):
+        tricks = [
+            "https://otx.alienvault.com/api/v1/indicators/../../user/me",
+            "https://internetdb.shodan.io/../x",
+            f"{VT}/files/..%2f..%2fx",
+            "https://internetdb.shodan.io/%2e%2e/x",
+            "https://internetdb.shodan.io/1.2.3.4\n",
+            "https://internetdb.shodan.io/1.2.3.4 x",
+            "https://internetdb.shodan.io\\@evil.example/",
+        ]
+        for url in tricks:
+            with self.subTest(url=url), self.assertRaises(BlockedEndpoint):
+                check_allowed("GET", url)
+
+    def test_quoted_url_ioc_with_dots_is_still_a_lookup(self):
+        # OTX gets URL IOCs percent-encoded: a ".." inside the IOC is not a path segment.
+        check_allowed("GET", "https://otx.alienvault.com/api/v1/indicators/url/http%3A%2F%2Fx.com%2F..%2Fa/general")
+
     def test_allowed(self):
         allowed = [
             ("GET", f"{VT}/domains/www.taibeinan.cc", None),
@@ -73,6 +91,17 @@ class RedirectTest(unittest.TestCase):
         with self.assertRaises(BlockedEndpoint):
             self.handler_redirect("https://otx.alienvault.com/api/v1/indicators/IPv4/1.2.3.4/general",
                                   "https://otx.alienvault.com/other", {"X-OTX-API-KEY": "K"})
+
+    def test_rdap_redirect_chain_is_followed_a_few_hops(self):
+        first = self.handler_redirect("https://rdap.org/domain/x.cc", "https://rdap.one.example/domain/x.cc", {})
+        second = _SafeRedirect().redirect_request(first, io.BytesIO(), 301, "Moved", {},
+                                                  "https://rdap.two.example/domain/x.cc")
+        self.assertEqual(second.full_url, "https://rdap.two.example/domain/x.cc")
+        hop = second
+        with self.assertRaises(BlockedEndpoint):
+            for n in range(5):
+                hop = _SafeRedirect().redirect_request(hop, io.BytesIO(), 301, "Moved", {},
+                                                       f"https://rdap.hop{n}.example/domain/x.cc")
 
     def test_rdap_redirect_needs_https(self):
         new = self.handler_redirect("https://rdap.org/domain/taibeinan.cc", "https://tld-rdap.verisign.com/cc/v1/domain/taibeinan.cc", {})

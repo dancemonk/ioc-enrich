@@ -67,6 +67,15 @@ class ServerTest(ServerHarness):
         self.assertIn(TOKEN.encode(), body)
         self.assertEqual(headers["Referrer-Policy"], "no-referrer")
 
+    def test_csv_link_is_revoked_after_the_download_starts(self):
+        # Revoking right after click() can cancel the download in Safari and Firefox.
+        page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
+        self.assertNotIn("link.click();\n  URL.revokeObjectURL", page)
+        self.assertIn("setTimeout(() => URL.revokeObjectURL(", page)
+
+    def test_non_ascii_token_gets_403(self):
+        self.assertEqual(self.request("/?t=%C3%A9", token=None)[0], 403)
+
     def test_page_accessibility_basics(self):
         page = self.request(f"/?t={TOKEN}", token=None)[1].decode()
         self.assertIn('<label for="text"', page)                       # paste box has a visible label
