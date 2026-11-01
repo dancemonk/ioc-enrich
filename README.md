@@ -55,7 +55,7 @@ Cost: 3 IOCs → 2 VirusTotal lookups, about 30 s
 ## Setup
 
 ```bash
-git clone <this repo> && cd ioc-enrich
+git clone https://github.com/dancemonk/ioc-enrich.git && cd ioc-enrich
 python3 -m venv .venv
 .venv/bin/pip install -e .
 .venv/bin/ioc-enrich --help
