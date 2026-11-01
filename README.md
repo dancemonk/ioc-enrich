@@ -88,4 +88,4 @@ From a clone, run the tests with `python3 -m unittest discover -s tests`. They u
 
 ## License
 
-MIT © Vlad Guliakin
+MIT © Vladislav Guliakin
