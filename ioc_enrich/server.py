@@ -24,8 +24,8 @@ from ioc_enrich.csvio import build_rows, rows_to_csv_text
 from ioc_enrich.engine import RunOptions, estimate, run
 from ioc_enrich.extract import extract
 from ioc_enrich.fang import defang
-from ioc_enrich.format import (enrichment, flagged_by, plan_status, result_kind, row_details, source_states,
-                                strong_gaps)
+from ioc_enrich.format import (enrichment, flag_summary, flagged_by, plan_status, result_kind, row_details,
+                                source_states, strong_gaps)
 from ioc_enrich.links import manual_links
 from ioc_enrich.lists import load_cdn_ranges, load_rdap_tlds, load_tlds
 from ioc_enrich.lookup_plan import LookupPlan, PlannedIOC, build_plan, keyed_sources, load_allowlist
@@ -297,7 +297,8 @@ def make_server(port: int, token: str, deps, keys: Keys | None = None) -> Thread
                              "sources": source_states(item, found), "cdn": item.cdn, "skip": item.skip,
                              "enrichment": text, "links": links})
             return {"done": job.done, "error": job.error, "stopped": job.stopped,
-                    "progress": job.plan.progress(results, reused=job.reused), "rows": rows}
+                    "progress": job.plan.progress(results, reused=job.reused), "rows": rows,
+                    "summary": flag_summary(rows)}
 
         def _csv(self, job: Job) -> None:
             with job.lock:

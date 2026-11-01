@@ -177,6 +177,8 @@ class ServerTest(ServerHarness):
         self.assertEqual(ie["kind"], "weak")
         self.assertEqual(ie["gaps"], [])                              # every strong source answered: really weak
         self.assertEqual(ie["details"], ["created 2001-01-12 via VT (9340 d before incident)"])   # only what chips don't show
+        from ioc_enrich.format import flag_summary
+        self.assertEqual(data["summary"], flag_summary(data["rows"]))   # the page shows the server's tally as is
         status, csv_body, headers = self.request(f"/api/job/{job}/csv")
         self.assertEqual(status, 200)
         self.assertTrue(csv_body.startswith(b"type,value,first_seen_utc"))

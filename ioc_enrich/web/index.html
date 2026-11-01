@@ -384,6 +384,7 @@ function formBody() {
 let lastRows = [];     // rows currently shown, kept so the filter can re-draw them
 let rowsFinal = false; // true once the run has finished: then rows sort strongest evidence first
 let lastRunStopped = false;   // the shown results come from a stopped run
+let runSummary = "";          // the server's tally line for the current run
 // Strong first; a weak hit with strong sources still unasked ranks above a fully checked weak one.
 function tierRank(row) {
   const order = { flag: 0, weak: 2, clean: 3, checking: 4, plan: 4, info: 4.5, skip: 5 };
@@ -508,15 +509,8 @@ function renderRows(rows) {
   $("table-wrap").hidden = rows.length === 0;     // no bare table headers on an empty page
   $("bottom").hidden = !currentJob;               // Download only once there is something to download
   $("results").classList.toggle("plan-view", !currentJob);   // Enrichment column only has content after a run
-  const strong = rows.filter((row) => row.kind === "flag").length;
-  const weakSoFar = rows.filter((row) => row.kind === "weak" && (row.gaps || []).length).length;
-  const weak = rows.filter((row) => row.kind === "weak").length - weakSoFar;
-  const checked = rows.filter((row) => !row.skip).length;
   $("table-tools").hidden = !currentJob;
-  setIfChanged($("flag-count"), currentJob && (rowsFinal || !running)   // no running tally chatter
-    ? (strong + weak + weakSoFar) + " of " + plural(checked, "checked IOC") + " flagged (" + strong + " strong, " + weak + " weak"
-      + (weakSoFar ? ", " + weakSoFar + " weak so far" : "") + ")"
-    : "");
+  setIfChanged($("flag-count"), currentJob && (rowsFinal || !running) ? runSummary : "");   // no running tally chatter
   let shown = currentJob && showFlaggedOnly() ? rows.filter((row) => row.kind === "flag" || row.kind === "weak") : rows;
   if (currentJob && rowsFinal) {
     // Finished results: strongest evidence first (stable: equal tiers keep their input order).
@@ -693,6 +687,7 @@ async function poll() {
   const data = await reply.json();
   rowsFinal = data.done;    // sort only once nothing moves any more
   lastRunStopped = Boolean(data.stopped);
+  runSummary = data.summary || "";
   renderRows(data.rows);
   runProgress = data.progress;
   if (data.done) {

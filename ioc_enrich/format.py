@@ -285,6 +285,25 @@ def strong_gaps(results: list[SourceResult]) -> list[str]:
     return gaps
 
 
+def flag_summary(rows: list[dict]) -> str:
+    """The page's tally line, from rows with "kind" and "gaps".
+
+    Only rows a threat-intel source answered count as checked: an IOC that only
+    RDAP or InternetDB described is "info only", never part of "0 of N flagged".
+    """
+    kinds = [row["kind"] for row in rows]
+    strong = kinds.count("flag")
+    weak_so_far = sum(1 for row in rows if row["kind"] == "weak" and row["gaps"])
+    weak = kinds.count("weak") - weak_so_far
+    checked = strong + kinds.count("weak") + kinds.count("clean")
+    info = f"; {kinds.count('info')} info only" if "info" in kinds else ""
+    if not checked:
+        return "No threat-intel source checked these IOCs" + info
+    so_far = f", {weak_so_far} weak so far" if weak_so_far else ""
+    return (f"{strong + weak + weak_so_far} of {_plural(checked, 'checked IOC')} flagged "
+            f"({strong} strong, {weak} weak{so_far}){info}")
+
+
 def _chip_metric(answer: SourceResult) -> str:
     """The one number or name a flagged chip shows next to its source, e.g. "VT 2/92"."""
     f = answer.fields

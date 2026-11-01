@@ -244,6 +244,31 @@ class OtxPulseCapTest(unittest.TestCase):
         self.assertEqual(flagged_by([R("OTX", fields={"pulses": 49}, flagged=True)]), "flagged by: OTX 49 pulses")
 
 
+class FlagSummaryTest(unittest.TestCase):
+    """The page's tally line. Only rows a threat-intel source answered count as checked."""
+
+    def row(self, kind, gaps=()):
+        return {"kind": kind, "gaps": list(gaps)}
+
+    def test_tally(self):
+        from ioc_enrich.format import flag_summary
+        rows = [self.row("flag"), self.row("weak"), self.row("weak", ["VT not asked (no key)"]),
+                self.row("clean"), self.row("skip")]
+        self.assertEqual(flag_summary(rows), "3 of 4 checked IOCs flagged (1 strong, 1 weak, 1 weak so far)")
+
+    # Bug: with no keys, InternetDB-only rows were counted as "checked IOCs"
+    def test_info_only_rows_are_not_checked(self):
+        from ioc_enrich.format import flag_summary
+        rows = [self.row("clean"), self.row("info"), self.row("info")]
+        self.assertEqual(flag_summary(rows), "0 of 1 checked IOC flagged (0 strong, 0 weak); 2 info only")
+
+    def test_nothing_checked(self):
+        from ioc_enrich.format import flag_summary
+        self.assertEqual(flag_summary([self.row("info"), self.row("skip")]),
+                         "No threat-intel source checked these IOCs; 1 info only")
+        self.assertEqual(flag_summary([self.row("skip")]), "No threat-intel source checked these IOCs")
+
+
 class WebWordingTest(unittest.TestCase):
     def test_no_cli_flags_in_page_texts(self):
         from ioc_enrich.format import row_details, source_states
