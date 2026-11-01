@@ -22,7 +22,8 @@ from ioc_enrich.models import IOC
 FILENAME_LIKE_TLDS = {"zip", "mov", "py", "sh", "md", "pl", "rs", "ps", "so", "cc"}
 
 # "](" splits a Markdown link: [evil.com](http://evil.com/x)
-_SPLIT = re.compile(r"[\s,;|\"'<>`]+|\]\(")
+_SPLIT = re.compile(r"[\s|\"'<>`]+|\]\(")
+_LIST_SEP = re.compile(r"[,;]+")      # "1.2.3.4,5.6.7.8" - but not inside a URL's query string
 _LEADING = "([{"
 _TRAILING = ".,;:)]}!?"
 _URL = re.compile(r"^https?://", re.IGNORECASE)
@@ -76,11 +77,28 @@ def _is_arpa(host: str) -> bool:
     return host.lower().rstrip(".").endswith(".arpa")
 
 
+def _tokens(text: str):
+    """Split text into candidate tokens.
+
+    "," and ";" separate list items, except inside a URL's query string,
+    where "?x=1,2;sid=3" is part of the URL.
+    """
+    for piece in _SPLIT.split(text):
+        head, sep, query = piece.partition("?")
+        parts = _LIST_SEP.split(head)
+        if sep and _URL.match(refang(parts[-1]).lstrip(_LEADING)):
+            parts[-1] += sep + query
+            yield from parts
+        else:
+            yield from _LIST_SEP.split(piece)
+
+
 def _normalize_url(url: str) -> tuple[str, str]:
-    """Lowercase scheme and host; return (url, host)."""
+    """Lowercase scheme and host; return (url, host). user@ before the host stays."""
     parts = urlsplit(url)
     host = (parts.hostname or "").rstrip(".")
-    netloc = host + (f":{parts.port}" if parts.port else "")
+    userinfo = parts.netloc.rpartition("@")[0]
+    netloc = (f"{userinfo}@" if userinfo else "") + host + (f":{parts.port}" if parts.port is not None else "")
     return urlunsplit((parts.scheme.lower(), netloc, parts.path, parts.query, parts.fragment)), host
 
 
@@ -158,7 +176,7 @@ def extract(text: str, tlds: set[str]) -> ExtractResult:
         if token.count("@") == 1:
             take(token.split("@")[1], was_defanged)
 
-    for raw in _SPLIT.split(text):
+    for raw in _tokens(text):
         if not raw:
             continue
         refanged = refang(raw)

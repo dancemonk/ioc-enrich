@@ -94,6 +94,21 @@ class TicketShapesTest(unittest.TestCase):
     def test_domain_with_port(self):
         self.assertEqual(pairs(extract("evil[.]com:8443", TLDS)), [("domain", "evil.com")])
 
+    def test_url_query_keeps_commas_and_semicolons(self):
+        result = extract("see http://evil.com/a?x=1,2;sid=3, then 1.2.3.4,5.6.7.8;9.9.9.9", TLDS)
+        self.assertEqual(pairs(result), [
+            ("url", "http://evil.com/a?x=1,2;sid=3"), ("domain", "evil.com"),
+            ("ip", "1.2.3.4"), ("ip", "5.6.7.8"), ("ip", "9.9.9.9")])
+
+    def test_comma_separated_urls(self):
+        self.assertEqual(pairs(extract("hxxp://a[.]com/x,hxxp://b[.]com/y", TLDS)), [
+            ("url", "http://a.com/x"), ("domain", "a.com"), ("url", "http://b.com/y"), ("domain", "b.com")])
+
+    def test_url_keeps_userinfo(self):
+        # "http://paypal.com@evil.com/" is a classic disguise: the host is evil.com
+        self.assertEqual(pairs(extract("hxxp://paypal[.]com@evil[.]com:8080/x", TLDS)), [
+            ("url", "http://paypal.com@evil.com:8080/x"), ("domain", "evil.com")])
+
     def test_arpa_names_are_ignored(self):
         tlds = TLDS | {"arpa"}
         result = extract("5.1.168.192.in-addr.arpa http://router.home.arpa/admin", tlds)

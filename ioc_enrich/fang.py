@@ -14,7 +14,8 @@ from ioc_enrich.models import IOC
 # Each pattern is matched case-insensitively and replaced with the real character.
 _REFANG_RULES = [
     (re.compile(r"hxxp(s?)", re.IGNORECASE), lambda m: "http" + m.group(1).lower()),
-    (re.compile(r"\[\.\]|\(\.\)|\[dot\]|\(dot\)", re.IGNORECASE), "."),
+    (re.compile(r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|\{dot\}|\\\.", re.IGNORECASE), "."),
+    (re.compile(r"\[://\]"), "://"),
     (re.compile(r"\[:\]"), ":"),
 ]
 
@@ -34,7 +35,8 @@ def defang(ioc: IOC) -> str:
     """Return the IOC value in the CSV's defanged style.
 
     Domains and IPs: every dot becomes [.].
-    URLs: scheme http -> hxxp, dots in the host -> [.], the port colon -> [:].
+    URLs: scheme http -> hxxp, dots in the host (and any user@ part) -> [.],
+    the port colon -> [:].
     The URL path is left as it is.
     Hashes are not clickable, so they stay unchanged.
     """
@@ -43,8 +45,10 @@ def defang(ioc: IOC) -> str:
     if ioc.type == "url":
         parts = urlsplit(ioc.value)
         scheme = parts.scheme.replace("http", "hxxp")
+        userinfo = parts.netloc.rpartition("@")[0]
+        user = _defang_host(userinfo) + "@" if userinfo else ""
         host = _defang_host(parts.hostname or "")
-        port = f"[:]{parts.port}" if parts.port else ""
+        port = f"[:]{parts.port}" if parts.port is not None else ""
         rest = ioc.value.split(parts.netloc, 1)[1]   # path + query + fragment, untouched
-        return f"{scheme}://{host}{port}{rest}"
+        return f"{scheme}://{user}{host}{port}{rest}"
     return ioc.value

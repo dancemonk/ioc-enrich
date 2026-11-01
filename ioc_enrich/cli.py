@@ -73,20 +73,28 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="show what would be queried and the VT cost; send nothing")
     p.add_argument("--allowlist", type=Path, default=DEFAULT_ALLOWLIST, help="known-good domains, one per line")
     p.add_argument("--keys", type=Path, default=DEFAULT_KEYS_FILE, help="keys file (NAME=value lines)")
-    p.add_argument("--vt-per-minute", type=int, default=4, help="VT rate limit (default 4, free key)")
-    p.add_argument("--vt-daily-limit", type=int, default=500, help="VT daily quota (default 500, free key)")
+    p.add_argument("--vt-per-minute", type=_positive_int, default=4, help="VT rate limit (default 4, free key)")
+    p.add_argument("--vt-daily-limit", type=_positive_int, default=500, help="VT daily quota (default 500, free key)")
     p.add_argument("--version", action="version", version=f"ioc-enrich {__version__}")
     return p
 
 
-def _read_input(args, stdin, existing) -> str:
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return value
+
+
+def _read_input(args, stdin, existing) -> tuple[str, bool]:
+    """The text to scan, and whether it is the --merge file's own rows."""
     if args.file:
-        return args.file.read_text(encoding="utf-8")
+        return args.file.read_text(encoding="utf-8"), False
     text = "" if stdin is None or stdin.isatty() else stdin.read()
     if not text.strip() and existing:
         # --merge with no input: re-check the lookup-able rows of the file.
-        text = "\n".join(row["value"] for row in existing if row["type"] in LOOKUP_TYPES)
-    return text
+        return "\n".join(row["value"] for row in existing if row["type"].lower() in LOOKUP_TYPES), True
+    return text, False
 
 
 def _section(out, title: str, lines: list[str]) -> None:
@@ -131,11 +139,15 @@ def _mark_unanswered(plan: LookupPlan, results, reason: str, today: date) -> Non
 def _enrich(args, stdin, out, err, env, deps: Deps) -> int:
     try:
         existing = read_rows(args.merge) if args.merge else None
-        text = _read_input(args, stdin, existing)
+        text, rechecking = _read_input(args, stdin, existing)
     except (OSError, ValueError, UnicodeDecodeError) as error:
         print(f"cannot read input: {error}", file=err)
         return 2
     found = extract(text, load_tlds())
+    if rechecking:
+        # Re-check the rows themselves: a url row must not add a new row for its host.
+        own = {row_key(row["type"], row["value"]) for row in existing}
+        found.iocs = [ioc for ioc in found.iocs if row_key(ioc.type, ioc.value) in own]
     if not found.iocs:
         print("No IOCs found in input.", file=err)
         return 2
@@ -155,6 +167,9 @@ def _enrich(args, stdin, out, err, env, deps: Deps) -> int:
     output = args.output or Path(default_output_name(deps.now()))
     if output.exists():
         print(f"refusing to overwrite {output} (choose another -o path)", file=err)
+        return 1
+    if not output.parent.is_dir():           # check now, not after spending VT quota
+        print(f"cannot write {output}: folder does not exist", file=err)
         return 1
 
     today = deps.now().date()
@@ -200,7 +215,12 @@ def _enrich(args, stdin, out, err, env, deps: Deps) -> int:
     _links_section(out, plan)
 
     rows, notes = build_rows(plan, results, existing, args.incident_date, today)
-    write_rows(output, rows)
+    try:
+        write_rows(output, rows)
+    except OSError as error:                 # e.g. another run took the name meanwhile
+        print(f"\ncannot write {output}: {error.strerror or error}. "
+              "The answers are cached: rerun with another -o path.", file=err)
+        return 1
     print(f"\nWrote {output} ({len(rows)} rows)", file=out)
     for note in notes:
         print(f"  {note}", file=out)

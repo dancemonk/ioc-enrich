@@ -18,6 +18,14 @@ class KeysTest(unittest.TestCase):
         self.assertNotIn("otxfile", repr(keys))
         self.assertIn("vt=set", repr(keys))
 
+    def test_common_file_styles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "keys.env"
+            path.write_text("\ufeffVT_API_KEY=vtkey\r\nexport OTX_API_KEY=otxkey\n"
+                            "ABUSEIPDB_API_KEY=abusekey  # mine\nABUSECH_AUTH_KEY='q#1'\n", encoding="utf-8")
+            keys = load_keys({}, path)
+        self.assertEqual((keys.vt, keys.otx, keys.abuseipdb, keys.abusech), ("vtkey", "otxkey", "abusekey", "q#1"))
+
     def test_missing_file(self):
         keys = load_keys({}, Path("/nonexistent/keys.env"))
         self.assertIsNone(keys.vt)

@@ -36,7 +36,7 @@ Cost: 3 IOCs → 2 VirusTotal lookups, about 30 s
 
 ## What happens to your input
 
-Extraction finds domains, IPv4 addresses, URLs and MD5/SHA1/SHA256 hashes in free text, and refangs `hxxp`, `[.]`, `(.)` and `[:]`. A URL gives one `url` row plus one row for its host. It also looks inside `label=value` and `md5:value`, `host/path` written without a scheme, `host:port`, Markdown links and email addresses (the domain only). `.arpa` names (reverse DNS, `home.arpa`) describe internal hosts, so they are listed as ignored and never sent.
+Extraction finds domains, IPv4 addresses, URLs and MD5/SHA1/SHA256 hashes in free text, and refangs `hxxp`, `[.]`, `(.)`, `{.}`, `[dot]`, `\.`, `[:]` and `[://]`. A URL gives one `url` row plus one row for its host. It also looks inside `label=value` and `md5:value`, `host/path` written without a scheme, `host:port`, Markdown links and email addresses (the domain only). `.arpa` names (reverse DNS, `home.arpa`) describe internal hosts, so they are listed as ignored and never sent.
 
 Before any lookup, duplicates go, private, reserved and multicast IPs are skipped, and allowlisted domains are left alone. IPs in a shared CDN range (Cloudflare, Fastly, CloudFront) are marked `shared CDN (…) - do not block` and never go to VirusTotal.
 
@@ -46,7 +46,7 @@ Each IOC is then asked only of the sources that support its type (table in the R
 
 `ioc-enrich keys` asks for each key in turn. Paste it and press Enter. The key isn't shown, and Enter on its own skips it or keeps the one you already saved. Keys go to `~/.config/ioc-enrich/keys.env`, which only you can read and which lives outside the repo, so it can't be committed. A running web page picks up new keys on reload.
 
-Environment variables (`VT_API_KEY`, `ABUSECH_AUTH_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`) win over the file. You can also write the file yourself:
+Environment variables (`VT_API_KEY`, `ABUSECH_AUTH_KEY`, `OTX_API_KEY`, `ABUSEIPDB_API_KEY`) win over the file. You can also write the file yourself (`export NAME=…`, quotes and `# comments` are fine):
 
 ```bash
 mkdir -p ~/.config/ioc-enrich

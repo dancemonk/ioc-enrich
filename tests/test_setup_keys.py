@@ -1,4 +1,5 @@
 import io
+import os
 import stat
 import tempfile
 import unittest
@@ -65,6 +66,40 @@ class SetupKeysTest(unittest.TestCase):
         self.path.chmod(0o644)
         self.run_setup(answers("", "", "", ""))
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+
+    def test_folder_the_user_chose_is_not_chmodded(self):
+        folder = Path(self.tmp.name) / "project"
+        folder.mkdir(mode=0o755)
+        folder.chmod(0o755)
+        out = io.StringIO()
+        run(folder / "keys.env", ask=answers(SECRET_VT, "", "", ""), out=out, env={})
+        self.assertEqual(stat.S_IMODE(folder.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE((folder / "keys.env").stat().st_mode), 0o600)
+
+    def test_keys_never_sit_in_a_readable_file(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("OTX_API_KEY=old\n")
+        self.path.chmod(0o644)
+        modes = []
+        real_replace = os.replace
+
+        def replace(src, dst):
+            modes.append(stat.S_IMODE(os.stat(src).st_mode))
+            real_replace(src, dst)
+
+        with mock.patch("ioc_enrich.setup_keys.os.replace", side_effect=replace):
+            self.run_setup(answers(SECRET_VT, "", "", ""))
+        self.assertEqual(modes, [0o600])               # written to a private temp file, then swapped in
+        self.assertEqual(load_keys({}, self.path).otx, "old")
+
+    def test_symlink_target_is_not_overwritten(self):
+        target = Path(self.tmp.name) / "elsewhere.txt"
+        target.write_text("do not touch\n")
+        self.path.parent.mkdir(parents=True)
+        self.path.symlink_to(target)
+        self.run_setup(answers(SECRET_VT, "", "", ""))
+        self.assertEqual(target.read_text(), "do not touch\n")
+        self.assertFalse(self.path.is_symlink())
 
     def test_enter_keeps_an_existing_key_and_other_lines_survive(self):
         self.path.parent.mkdir(parents=True)

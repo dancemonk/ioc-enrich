@@ -8,6 +8,7 @@ import csv
 import io
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from ioc_enrich.fang import defang, refang
 from ioc_enrich.format import checked_on, enrichment
@@ -23,12 +24,26 @@ def read_rows(path: Path) -> list[dict[str, str]]:
         reader = csv.DictReader(handle)
         if reader.fieldnames != COLUMNS:
             raise ValueError(f"{path}: expected columns {','.join(COLUMNS)}")
-        return list(reader)
+        rows = []
+        for row in reader:
+            # Too many fields land under the key None, too few leave None values.
+            if None in row or None in row.values():
+                raise ValueError(f"{path} line {reader.line_num}: expected {len(COLUMNS)} fields")
+            rows.append(row)
+        return rows
 
 
 def row_key(row_type: str, value: str) -> tuple[str, str]:
-    """Rows match on type + refanged, lowercase value."""
-    return row_type, refang(value).lower()
+    """Rows match on type + refanged, lowercase value.
+
+    For URLs only the scheme and host are lowercased: "/Path" and "/path"
+    can be different pages.
+    """
+    row_type, value = row_type.lower(), refang(value)
+    if row_type != "url":
+        return row_type, value.lower()
+    parts = urlsplit(value)
+    return row_type, urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment))
 
 
 def ref_date(row: dict | None, incident_date: date | None) -> date | None:
@@ -86,9 +101,13 @@ def rows_to_csv_text(rows: list[dict]) -> str:
 
 
 def write_rows(path: Path, rows: list[dict]) -> None:
-    """Write a new CSV. Mode 'x' refuses to overwrite an existing file."""
+    """Write a new CSV. Mode 'x' refuses to overwrite an existing file.
+
+    The text is built first, so a failure never leaves an empty file behind.
+    """
+    text = rows_to_csv_text(rows)
     with path.open("x", newline="", encoding="utf-8") as handle:
-        handle.write(rows_to_csv_text(rows))
+        handle.write(text)
 
 
 def default_output_name(now: datetime) -> str:

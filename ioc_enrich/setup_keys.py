@@ -27,22 +27,33 @@ def _looks_like_key(value: str) -> bool:
 
 
 def _write(path: Path, values: dict[str, str]) -> None:
-    """Replace our NAME=value lines; keep comments and any other lines."""
+    """Replace our NAME=value lines; keep comments and any other lines.
+
+    The new file is written to a private (0600) temp file and swapped in with
+    os.replace, so the keys never sit in a readable file, a crash never cuts
+    the file short, and a symlink at `path` is replaced, never written through.
+    """
     ours = set(ENV_NAMES.values())
     kept = []
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            name = line.split("=", 1)[0].strip() if "=" in line else ""
+    if path.exists() and not path.is_symlink():
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            name = line.split("=", 1)[0].strip().removeprefix("export ").strip() if "=" in line else ""
             if name not in ours:
                 kept.append(line)
     lines = kept + [f"{env}={values[env]}" for env in ENV_NAMES.values() if env in values]
+    folder_is_new = not path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
-    # Create owner-only from the start, so the keys are never readable by others.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-    path.chmod(0o600)
+    if folder_is_new or path.parent == DEFAULT_KEYS_FILE.parent:
+        path.parent.chmod(0o700)         # our own folder; never chmod a folder the user picked
+    temp = path.with_name(f".{path.name}.tmp")
+    temp.unlink(missing_ok=True)         # left over from a crash
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def run(path: Path, *, ask: Callable[[str], str] = getpass.getpass, out=sys.stdout,
@@ -69,7 +80,7 @@ def run(path: Path, *, ask: Callable[[str], str] = getpass.getpass, out=sys.stdo
 
     print(file=out)
     if not entered:
-        if path.exists():
+        if path.exists() and not path.is_symlink():
             path.chmod(0o600)       # still make an existing file owner-only
         print("Nothing saved.", file=out)
     else:

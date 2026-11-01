@@ -35,6 +35,12 @@ class CsvTest(unittest.TestCase):
     def test_row_key(self):
         self.assertEqual(row_key("domain", "WWW.Grinswakebthu[.]info"), ("domain", "www.grinswakebthu.info"))
 
+    def test_row_key_type_case_and_url_path(self):
+        self.assertEqual(row_key("MD5", "D41D8CD98F00B204E9800998ECF8427E"),
+                         ("md5", "d41d8cd98f00b204e9800998ecf8427e"))
+        self.assertEqual(row_key("url", "hxxp://Evil[.]com/Path"), ("url", "http://evil.com/Path"))
+        self.assertNotEqual(row_key("url", "http://evil.com/Path"), row_key("url", "http://evil.com/path"))
+
     def test_merge_complete_updates_only_tool_columns(self):
         before = next(r for r in self.existing if r["value"] == "www.grinswakebthu[.]info").copy()
         rows, notes = build_rows(plan_of(planned(GRIN)), {GRIN: complete_results()}, self.existing, None, TODAY)
@@ -88,6 +94,22 @@ class CsvTest(unittest.TestCase):
             bom = Path(tmp) / "excel.csv"
             bom.write_bytes(b"\xef\xbb\xbf" + FIX.read_bytes())
             self.assertEqual(read_rows(bom), self.existing)
+
+    def test_rows_with_wrong_field_count_rejected_up_front(self):
+        header = ",".join(COLUMNS) + "\n"
+        for body in ["md5\n", "md5,d41d8cd98f00b204e9800998ecf8427e,,,,,,,,extra\n"]:
+            with tempfile.TemporaryDirectory() as tmp:
+                bad = Path(tmp) / "bad.csv"
+                bad.write_text(header + "ip,1.2.3.4,,,,,,,\n" + body)
+                with self.assertRaisesRegex(ValueError, "line 3"):
+                    read_rows(bad)
+
+    def test_failed_write_leaves_no_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.csv"
+            with self.assertRaises(ValueError):
+                write_rows(out, [{**dict.fromkeys(COLUMNS, ""), None: "extra"}])
+            self.assertFalse(out.exists())
 
     def test_header_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:

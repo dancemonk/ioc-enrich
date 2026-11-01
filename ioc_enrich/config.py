@@ -4,6 +4,7 @@ Keys are never printed: the Keys class hides them in repr().
 """
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -43,16 +44,26 @@ class Keys:
 
 
 def _read_keys_file(path: Path) -> dict[str, str]:
-    """Parse NAME=value lines; '#' starts a comment; quotes are stripped."""
+    """Parse NAME=value lines, the way people write .env files.
+
+    '#' starts a comment (also after a value), quotes are stripped, an
+    "export " prefix is allowed, and utf-8-sig drops a leading BOM.
+    """
     values = {}
     if not path.exists():
         return values
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, value = line.split("=", 1)
-        values[name.strip()] = value.strip().strip('"').strip("'")
+        name = name.strip().removeprefix("export ").strip()
+        value = value.strip()
+        if value[:1] in ("'", '"') and value[0] in value[1:]:
+            value = value[1:value.index(value[0], 1)]       # quoted: '#' inside is part of the key
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0]
+        values[name] = value
     return values
 
 

@@ -93,6 +93,39 @@ class CliTest(CliHarness):
         self.assertIn("refusing to overwrite", err)
         self.assertEqual(http.calls, [])
 
+    def test_missing_output_folder_refused_before_any_lookup(self):
+        code, _, err, http = self.cli(["-o", str(self.dir / "nodir" / "x.csv")])
+        self.assertEqual(code, 1)
+        self.assertIn("folder does not exist", err)
+        self.assertEqual(http.calls, [])
+
+    def test_write_failure_after_run_is_reported_not_raised(self):
+        out_path = self.dir / "race.csv"
+
+        class CreatesOutput(FakeHttp):          # another run grabs the same name meanwhile
+            def _answer(self, method, url, body, headers):
+                out_path.touch()
+                return super()._answer(method, url, body, headers)
+
+        code, _, err, _ = self.cli(["-o", str(out_path)], http=CreatesOutput(sample_routes()))
+        self.assertEqual(code, 1)
+        self.assertIn("cannot write", err)
+        self.assertIn("answers are cached", err)
+
+    def test_vt_limits_must_be_positive(self):
+        for flag in ["--vt-per-minute", "--vt-daily-limit"]:
+            with self.assertRaises(SystemExit):
+                self.cli([flag, "0", "--dry-run"])
+
+    def test_merge_recheck_adds_no_rows(self):
+        merge = self.dir / "urls.csv"
+        merge.write_text("type,value,first_seen_utc,frame,context,role,confidence,enrichment,checked_on\n"
+                         "url,hxxp://www.independent[.]ie/ujvq/,,,,,,,\n")
+        out_path = self.dir / "rechecked.csv"
+        code, _, _, _ = self.cli(["--merge", str(merge), "-o", str(out_path)], stdin_text="")
+        self.assertEqual(code, 0)
+        self.assertEqual([r["type"] for r in read_rows(out_path)], ["url"])
+
     def test_merge_without_input_rechecks_file_rows(self):
         out_path = self.dir / "merged.csv"
         code, out, _, http = self.cli(["--merge", str(FIX / "iocs_sample.csv"), "-o", str(out_path)], stdin_text="")

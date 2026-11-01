@@ -10,6 +10,9 @@ class RefangTest(unittest.TestCase):
         self.assertEqual(refang("HXXPS://a(.)b[.]c"), "https://a.b.c")
         self.assertEqual(refang("1.2.3[.]4[:]8080"), "1.2.3.4:8080")
         self.assertEqual(refang("x[dot]com"), "x.com")
+        self.assertEqual(refang("evil{.}com"), "evil.com")
+        self.assertEqual(refang("hxxps[://]evil[.]com/a"), "https://evil.com/a")
+        self.assertEqual(refang("evil\\.com"), "evil.com")
 
     def test_plain_text_unchanged(self):
         self.assertEqual(refang("www.example.com"), "www.example.com")
@@ -23,6 +26,10 @@ class DefangTest(unittest.TestCase):
     def test_defang_url_host_and_port_only(self):
         self.assertEqual(defang(IOC("url", "http://1.2.3.4:8080/a.php")), "hxxp://1[.]2[.]3[.]4[:]8080/a.php")
         self.assertEqual(defang(IOC("url", "https://www.independent.ie/ujvq/")), "hxxps://www[.]independent[.]ie/ujvq/")
+
+    def test_defang_url_with_userinfo(self):
+        self.assertEqual(defang(IOC("url", "http://paypal.com@evil.com:8080/x")),
+                         "hxxp://paypal[.]com@evil[.]com[:]8080/x")
 
     def test_defang_hash_unchanged(self):
         h = "d41d8cd98f00b204e9800998ecf8427e"
