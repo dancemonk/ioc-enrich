@@ -16,12 +16,18 @@ It runs from the command line or as a local web page, on Python 3.11+ with no th
 ## Quick start
 
 ```bash
-git clone https://github.com/dancemonk/ioc-enrich.git && cd ioc-enrich
-python3 -m venv .venv && .venv/bin/pip install -e .
-source .venv/bin/activate
+uv tool install git+https://github.com/dancemonk/ioc-enrich
 
 ioc-enrich keys     # paste your free API keys; Enter skips one
 ioc-enrich serve    # open the printed http://127.0.0.1:8765/?t=... link
+```
+
+No [uv](https://docs.astral.sh/uv/)? Use a venv instead:
+
+```bash
+git clone https://github.com/dancemonk/ioc-enrich.git && cd ioc-enrich
+python3 -m venv .venv && .venv/bin/pip install -e .
+source .venv/bin/activate
 ```
 
 Or stay in the terminal:
@@ -77,7 +83,7 @@ VirusTotal adds every IOC you look up to its dataset, and attackers watch it. Us
 
 [docs/usage.md](docs/usage.md) has every command and option, the CSV format, the flagging rules, how VirusTotal quota is handled and the known limitations.
 
-Run the tests with `.venv/bin/python -m unittest discover -s tests`. They use recorded API responses and never touch the network.
+From a clone, run the tests with `python3 -m unittest discover -s tests`. They use recorded API responses and never touch the network.
 
 ## License
 
